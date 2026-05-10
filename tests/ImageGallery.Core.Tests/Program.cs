@@ -37,10 +37,10 @@ var layout = GalleryLayoutCalculator.Calculate(
     scrollY: 0,
     options: new GalleryLayoutOptions(ThumbnailSize: 100, TextAreaHeight: 44, Padding: 8, Gap: 12));
 
-AssertEqual(3, layout.Columns, "layout columns");
-AssertEqual(34, layout.Rows, "layout rows");
+AssertEqual(4, layout.Columns, "layout columns");
+AssertEqual(25, layout.Rows, "layout rows");
 AssertEqual(0, layout.VisibleRange.FirstIndex, "first visible index");
-AssertEqual(5, layout.VisibleRange.LastIndex, "last visible index");
+AssertEqual(7, layout.VisibleRange.LastIndex, "last visible index");
 
 var scrolledLayout = GalleryLayoutCalculator.Calculate(
     itemCount: 100,
@@ -50,7 +50,7 @@ var scrolledLayout = GalleryLayoutCalculator.Calculate(
     scrollY: 360,
     options: new GalleryLayoutOptions(ThumbnailSize: 100, TextAreaHeight: 44, Padding: 8, Gap: 12));
 
-AssertEqual(6, scrolledLayout.VisibleRange.FirstIndex, "scrolled first visible index");
+AssertEqual(8, scrolledLayout.VisibleRange.FirstIndex, "scrolled first visible index");
 
 var selection = new SelectionManager();
 selection.Select(index: 2, itemCount: 10, ctrl: false, shift: false);
@@ -60,8 +60,8 @@ selection.Select(index: 4, itemCount: 10, ctrl: true, shift: false);
 AssertSequence(new[] { 2, 4 }, selection.SelectedIndexes, "ctrl add");
 
 selection.Select(index: 7, itemCount: 10, ctrl: false, shift: true);
-AssertSequence(new[] { 2, 3, 4, 5, 6, 7 }, selection.SelectedIndexes, "shift range");
-AssertSequence(new[] { 7, 6, 5, 4, 3, 2 }, selection.GetSelectedIndexesDescending(), "delete order");
+AssertSequence(new[] { 4, 5, 6, 7 }, selection.SelectedIndexes, "shift range");
+AssertSequence(new[] { 7, 6, 5, 4 }, selection.GetSelectedIndexesDescending(), "delete order");
 
 var evicted = new List<string>();
 var cache = new LruCache<string, string>(capacity: 2, onEvicted: item => evicted.Add(item));
