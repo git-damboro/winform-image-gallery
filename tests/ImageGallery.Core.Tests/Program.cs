@@ -27,6 +27,10 @@ AssertEqual("2 MB", HumanReadableSizeFormatter.Format(2 * 1024 * 1024), "megabyt
 
 AssertEqual(true, FileFormatPolicy.IsSupported("photo.JPG"), "jpg extension");
 AssertEqual(true, FileFormatPolicy.IsSupported(@"C:\Images\scan.tiff"), "tiff extension");
+AssertEqual(true, FileFormatPolicy.IsRecognized("modern.webp"), "webp recognized");
+AssertEqual(true, FileFormatPolicy.IsRecognized("phone.heic"), "heic recognized");
+AssertEqual(true, FileFormatPolicy.IsRecognized("camera.avif"), "avif recognized");
+AssertEqual(false, FileFormatPolicy.IsNativelyDecodable("phone.heic"), "heic not native");
 AssertEqual(false, FileFormatPolicy.IsSupported("notes.txt"), "txt extension");
 
 var layout = GalleryLayoutCalculator.Calculate(
@@ -51,6 +55,19 @@ var scrolledLayout = GalleryLayoutCalculator.Calculate(
     options: new GalleryLayoutOptions(ThumbnailSize: 100, TextAreaHeight: 44, Padding: 8, Gap: 12));
 
 AssertEqual(8, scrolledLayout.VisibleRange.FirstIndex, "scrolled first visible index");
+
+var largeLayout = GalleryLayoutCalculator.Calculate(
+    itemCount: 10_000,
+    viewportWidth: 1200,
+    viewportHeight: 800,
+    scrollX: 0,
+    scrollY: 0,
+    options: new GalleryLayoutOptions(ThumbnailSize: 128, TextAreaHeight: 58, Padding: 10, Gap: 14));
+
+AssertEqual(7, largeLayout.Columns, "large layout columns");
+AssertEqual(1429, largeLayout.Rows, "large layout rows");
+AssertEqual(0, largeLayout.VisibleRange.FirstIndex, "large first visible index");
+AssertEqual(true, largeLayout.VisibleRange.LastIndex < 100, "large visible range stays bounded");
 
 var selection = new SelectionManager();
 selection.Select(index: 2, itemCount: 10, ctrl: false, shift: false);

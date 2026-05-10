@@ -47,6 +47,8 @@ public sealed class ImageGalleryControl : UserControl
 
     public event EventHandler<ImageItem>? PreviewRequested;
 
+    public event EventHandler<ImageItem>? ImageOpenRequested;
+
     public event EventHandler? PreviewCloseRequested;
 
     public int ThumbnailSize
@@ -217,7 +219,7 @@ public sealed class ImageGalleryControl : UserControl
         {
             TextRenderer.DrawText(
                 e.Graphics,
-                "请点击“添加图片”导入图像",
+                "\u8bf7\u70b9\u51fb\u201c\u6dfb\u52a0\u56fe\u7247\u201d\u5bfc\u5165\u56fe\u50cf",
                 Font,
                 _canvas.ClientRectangle,
                 Color.FromArgb(120, 126, 138),
@@ -311,7 +313,7 @@ public sealed class ImageGalleryControl : UserControl
         var index = HitTest(e.Location);
         if (index >= 0)
         {
-            PreviewRequested?.Invoke(this, _items[index]);
+            ImageOpenRequested?.Invoke(this, _items[index]);
         }
     }
 

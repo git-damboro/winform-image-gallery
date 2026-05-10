@@ -8,9 +8,13 @@ namespace ImageGallery.App.Services;
 public sealed class ThumbnailService : IDisposable
 {
     private const int CacheCapacity = 600;
+    private const int MaxPendingItems = 256;
+    private static readonly int MaxConcurrentDecoders = Math.Max(2, Math.Min(4, Environment.ProcessorCount / 2));
 
     private readonly LruCache<string, Image> _cache = new(CacheCapacity, image => image.Dispose());
     private readonly ConcurrentDictionary<string, byte> _pendingKeys = new();
+    private readonly ConcurrentDictionary<string, byte> _failedKeys = new();
+    private readonly SemaphoreSlim _decoderGate = new(MaxConcurrentDecoders, MaxConcurrentDecoders);
     private readonly object _syncRoot = new();
 
     public Image? GetOrQueue(ImageItem item, int thumbnailSize, Action invalidate)
@@ -25,9 +29,25 @@ public sealed class ThumbnailService : IDisposable
             }
         }
 
+        if (_failedKeys.ContainsKey(key) || _pendingKeys.Count >= MaxPendingItems)
+        {
+            return null;
+        }
+
         if (_pendingKeys.TryAdd(key, 0))
         {
-            _ = Task.Run(() => LoadThumbnail(item, thumbnailSize))
+            _ = Task.Run(async () =>
+                {
+                    await _decoderGate.WaitAsync().ConfigureAwait(false);
+                    try
+                    {
+                        return LoadThumbnail(item, thumbnailSize);
+                    }
+                    finally
+                    {
+                        _decoderGate.Release();
+                    }
+                })
                 .ContinueWith(task =>
                 {
                     try
@@ -38,6 +58,10 @@ public sealed class ThumbnailService : IDisposable
                             {
                                 _cache.Set(key, task.Result);
                             }
+                        }
+                        else
+                        {
+                            _failedKeys.TryAdd(key, 0);
                         }
                     }
                     finally
@@ -57,11 +81,14 @@ public sealed class ThumbnailService : IDisposable
         {
             _cache.Clear();
         }
+
+        _failedKeys.Clear();
     }
 
     public void Dispose()
     {
         Clear();
+        _decoderGate.Dispose();
     }
 
     private static string CreateKey(ImageItem item, int thumbnailSize)

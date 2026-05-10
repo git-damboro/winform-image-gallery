@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly TrackBar _sizeTrackBar = new();
     private readonly ComboBox _styleComboBox = new();
     private PreviewForm? _previewForm;
+    private PreviewForm? _pinnedPreviewForm;
 
     public MainForm()
     {
@@ -30,6 +31,7 @@ public sealed class MainForm : Form
         toolbar.Dock = DockStyle.Top;
         _galleryControl.Dock = DockStyle.Fill;
         _galleryControl.PreviewRequested += GalleryControlOnPreviewRequested;
+        _galleryControl.ImageOpenRequested += GalleryControlOnImageOpenRequested;
         _galleryControl.PreviewCloseRequested += GalleryControlOnPreviewCloseRequested;
 
         UpdateCountLabel();
@@ -40,6 +42,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             _previewForm?.Dispose();
+            _pinnedPreviewForm?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -58,21 +61,28 @@ public sealed class MainForm : Form
 
         var addButton = new Button
         {
-            Text = "添加图片",
+            Text = "\u6dfb\u52a0\u56fe\u7247",
             AutoSize = true
         };
         addButton.Click += AddButtonOnClick;
 
         var deleteButton = new Button
         {
-            Text = "删除选中",
+            Text = "\u5220\u9664\u9009\u4e2d",
             AutoSize = true
         };
         deleteButton.Click += DeleteButtonOnClick;
 
+        var simulateButton = new Button
+        {
+            Text = "\u6a21\u62df1\u4e07\u5f20",
+            AutoSize = true
+        };
+        simulateButton.Click += SimulateButtonOnClick;
+
         var sizeLabel = new Label
         {
-            Text = "缩略图",
+            Text = "\u7f29\u7565\u56fe",
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(16, 8, 0, 0)
@@ -102,6 +112,7 @@ public sealed class MainForm : Form
 
         toolbar.Controls.Add(addButton);
         toolbar.Controls.Add(deleteButton);
+        toolbar.Controls.Add(simulateButton);
         toolbar.Controls.Add(sizeLabel);
         toolbar.Controls.Add(_sizeTrackBar);
         toolbar.Controls.Add(_styleComboBox);
@@ -116,7 +127,7 @@ public sealed class MainForm : Form
         {
             Filter = FileFormatPolicy.FileDialogFilter,
             Multiselect = true,
-            Title = "选择图片"
+            Title = "\u9009\u62e9\u56fe\u7247"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.FileNames.Length == 0)
@@ -134,7 +145,7 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "添加图片失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "\u6dfb\u52a0\u56fe\u7247\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -159,6 +170,15 @@ public sealed class MainForm : Form
         ClosePreview();
     }
 
+    private void SimulateButtonOnClick(object? sender, EventArgs e)
+    {
+        _items.Clear();
+        _items.AddRange(_imageFileService.CreatePlaceholderItems(10_000));
+        _galleryControl.SetItems(_items);
+        UpdateCountLabel();
+        ClosePreview();
+    }
+
     private void GalleryControlOnPreviewRequested(object? sender, ImageItem item)
     {
         try
@@ -168,7 +188,20 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "预览失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, ex.Message, "\u9884\u89c8\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void GalleryControlOnImageOpenRequested(object? sender, ImageItem item)
+    {
+        try
+        {
+            _pinnedPreviewForm ??= new PreviewForm();
+            _pinnedPreviewForm.ShowImage(item, Cursor.Position, pinned: true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "\u5927\u56fe\u67e5\u770b\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -184,11 +217,11 @@ public sealed class MainForm : Form
             return;
         }
 
-        _previewForm.Hide();
+        _previewForm.HidePreview();
     }
 
     private void UpdateCountLabel()
     {
-        _countLabel.Text = $"共 {_items.Count:N0} 张";
+        _countLabel.Text = $"\u5171 {_items.Count:N0} \u5f20";
     }
 }

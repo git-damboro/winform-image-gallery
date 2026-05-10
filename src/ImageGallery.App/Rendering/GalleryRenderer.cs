@@ -102,7 +102,7 @@ public sealed class GalleryRenderer
         }
         else
         {
-            var text = item.HasError ? "无法加载" : "加载中";
+            var text = item.HasError ? "\u65e0\u6cd5\u52a0\u8f7d" : "\u52a0\u8f7d\u4e2d";
             TextRenderer.DrawText(
                 graphics,
                 text,
