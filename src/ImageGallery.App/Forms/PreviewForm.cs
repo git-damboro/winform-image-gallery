@@ -36,9 +36,9 @@ public sealed class PreviewForm : Form
         _overlay.Dock = DockStyle.Fill;
         _overlay.NavigateRequested += OverlayOnNavigateRequested;
 
+        _pictureBox.Controls.Add(_overlay);
         Controls.Add(_pictureBox);
         Controls.Add(_errorLabel);
-        Controls.Add(_overlay);
         _overlay.BringToFront();
     }
 

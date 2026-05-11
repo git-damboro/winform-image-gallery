@@ -23,7 +23,8 @@ internal sealed class PreviewNavigationOverlay : Control
             ControlStyles.AllPaintingInWmPaint
             | ControlStyles.OptimizedDoubleBuffer
             | ControlStyles.UserPaint
-            | ControlStyles.ResizeRedraw,
+            | ControlStyles.ResizeRedraw
+            | ControlStyles.SupportsTransparentBackColor,
             true);
 
         BackColor = Color.Transparent;
