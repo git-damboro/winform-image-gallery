@@ -9,7 +9,7 @@ public sealed class PreviewForm : Form
 {
     private readonly PictureBox _pictureBox = new();
     private readonly Label _errorLabel = new();
-    private readonly Label _hintLabel = new();
+    private readonly PreviewNavigationOverlay _overlay = new();
     private IReadOnlyList<ImageItem> _items = Array.Empty<ImageItem>();
     private int _currentIndex = -1;
     private Image? _currentImage;
@@ -27,26 +27,19 @@ public sealed class PreviewForm : Form
         _pictureBox.Dock = DockStyle.Fill;
         _pictureBox.SizeMode = PictureBoxSizeMode.Zoom;
         _pictureBox.BackColor = Color.FromArgb(18, 22, 30);
-        _pictureBox.MouseDown += PreviewSurfaceOnMouseDown;
-        _pictureBox.Cursor = Cursors.Hand;
 
         _errorLabel.Dock = DockStyle.Fill;
         _errorLabel.TextAlign = ContentAlignment.MiddleCenter;
         _errorLabel.ForeColor = Color.White;
         _errorLabel.Visible = false;
-        _errorLabel.MouseDown += PreviewSurfaceOnMouseDown;
 
-        _hintLabel.Dock = DockStyle.Bottom;
-        _hintLabel.Height = 28;
-        _hintLabel.TextAlign = ContentAlignment.MiddleCenter;
-        _hintLabel.ForeColor = Color.FromArgb(200, 220, 230, 240);
-        _hintLabel.BackColor = Color.FromArgb(18, 22, 30);
-        _hintLabel.MouseDown += PreviewSurfaceOnMouseDown;
+        _overlay.Dock = DockStyle.Fill;
+        _overlay.NavigateRequested += OverlayOnNavigateRequested;
 
         Controls.Add(_pictureBox);
         Controls.Add(_errorLabel);
-        Controls.Add(_hintLabel);
-        MouseDown += PreviewSurfaceOnMouseDown;
+        Controls.Add(_overlay);
+        _overlay.BringToFront();
     }
 
     protected override void Dispose(bool disposing)
@@ -122,26 +115,9 @@ public sealed class PreviewForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    private void PreviewSurfaceOnMouseDown(object? sender, MouseEventArgs e)
+    private void OverlayOnNavigateRequested(object? sender, int delta)
     {
-        if (e.Button != MouseButtons.Left)
-        {
-            return;
-        }
-
-        if (_items.Count <= 1)
-        {
-            return;
-        }
-
-        if (e.X < ClientSize.Width / 2)
-        {
-            Navigate(-1);
-        }
-        else
-        {
-            Navigate(1);
-        }
+        Navigate(delta);
     }
 
     private void Navigate(int delta)
@@ -168,9 +144,7 @@ public sealed class PreviewForm : Form
         _currentImage?.Dispose();
         _currentImage = null;
         _errorLabel.Visible = false;
-        _hintLabel.Text = _items.Count > 1
-            ? "\u5de6\u952e/\u53f3\u952e\u6216\u5355\u51fb\u5de6\u53f3\u4fa7\u5207\u6362"
-            : string.Empty;
+        _overlay.UpdateState(_items, _currentIndex);
 
         try
         {
