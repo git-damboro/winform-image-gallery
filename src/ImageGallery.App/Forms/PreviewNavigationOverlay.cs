@@ -183,8 +183,8 @@ internal sealed class PreviewNavigationOverlay : Control
         DrawTitleBar(graphics, alpha);
         if (_items.Count > 1)
         {
-            DrawSideButton(graphics, alpha, true);
-            DrawSideButton(graphics, alpha, false);
+            DrawEdgeArrow(graphics, alpha, true);
+            DrawEdgeArrow(graphics, alpha, false);
         }
     }
 
@@ -220,48 +220,28 @@ internal sealed class PreviewNavigationOverlay : Control
     private void DrawSideButton(Graphics graphics, int alpha, bool left)
     {
         var zone = left ? GetLeftZone() : GetRightZone();
-        var buttonWidth = Math.Max(92, zone.Width - 28);
-        var buttonHeight = Math.Max(122, Math.Min(170, Height - 160));
-        var buttonY = (Height - buttonHeight) / 2;
-        var buttonX = left ? 14 : Width - buttonWidth - 14;
-        var buttonRect = new Rectangle(buttonX, buttonY, buttonWidth, buttonHeight);
         var hovered = zone.Contains(PointToClient(Cursor.Position));
-        var fillAlpha = hovered ? Clamp(alpha * 170 / 255) : Clamp(alpha * 120 / 255);
-        var borderAlpha = hovered ? Clamp(alpha * 180 / 255) : Clamp(alpha * 110 / 255);
-
-        using var fillBrush = new LinearGradientBrush(
-            buttonRect,
-            Color.FromArgb(fillAlpha, 20, 26, 36),
-            Color.FromArgb(Clamp(fillAlpha - 18), 14, 18, 26),
-            LinearGradientMode.Vertical);
-        graphics.FillRoundedRectangle(fillBrush, buttonRect, 18);
-
-        using var borderPen = new Pen(Color.FromArgb(borderAlpha, 255, 255, 255), 1.2f);
-        graphics.DrawRoundedRectangle(borderPen, buttonRect, 18);
-
         var arrow = left ? "\u25c0" : "\u25b6";
-        var label = left ? "\u4e0a\u4e00\u5f20" : "\u4e0b\u4e00\u5f20";
-        using var arrowFont = new Font(Font.FontFamily, 22f, FontStyle.Bold);
-        using var labelFont = new Font(Font.FontFamily, 10.5f, FontStyle.Bold);
+        var arrowFontSize = hovered ? 34f : 28f;
+        var arrowColor = Color.FromArgb(Clamp(hovered ? alpha : alpha * 210 / 255), 245, 248, 252);
+        using var arrowFont = new Font(Font.FontFamily, arrowFontSize, FontStyle.Bold);
 
-        var arrowRect = new Rectangle(buttonRect.X, buttonRect.Y + 28, buttonRect.Width, 34);
-        var labelRect = new Rectangle(buttonRect.X + 6, buttonRect.Bottom - 46, buttonRect.Width - 12, 20);
+        var arrowRect = left
+            ? new Rectangle(10, (Height - 42) / 2, 28, 42)
+            : new Rectangle(Width - 38, (Height - 42) / 2, 28, 42);
 
         TextRenderer.DrawText(
             graphics,
             arrow,
             arrowFont,
             arrowRect,
-            Color.FromArgb(alpha, 248, 250, 252),
+            arrowColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
 
-        TextRenderer.DrawText(
-            graphics,
-            label,
-            labelFont,
-            labelRect,
-            Color.FromArgb(alpha, 220, 228, 236),
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+    private void DrawEdgeArrow(Graphics graphics, int alpha, bool left)
+    {
+        DrawSideButton(graphics, alpha, left);
     }
 
     private static int Clamp(int value)
