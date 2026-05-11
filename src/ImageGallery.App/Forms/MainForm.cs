@@ -86,6 +86,7 @@ public sealed class MainForm : Form
             }
 
             BeginTask("\u6b63\u5728\u6062\u590d\u56fe\u7247\u5217\u8868", savedState.ImagePaths.Count);
+            await Task.Yield();
             var savedItems = await CreateItemsWithProgressAsync("\u6b63\u5728\u6062\u590d\u56fe\u7247\u5217\u8868", savedState.ImagePaths);
             _items.Clear();
             _items.AddRange(savedItems);
@@ -467,6 +468,7 @@ public sealed class MainForm : Form
         try
         {
             BeginTask("\u6b63\u5728\u6dfb\u52a0\u56fe\u7247", dialog.FileNames.Length);
+            await Task.Yield();
             var newItems = await CreateItemsWithProgressAsync("\u6b63\u5728\u6dfb\u52a0\u56fe\u7247", dialog.FileNames);
             _items.AddRange(newItems);
             _galleryControl.SetItems(_items);
@@ -505,6 +507,7 @@ public sealed class MainForm : Form
         _taskProgressBar.Value = 0;
         _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, 0, total);
         _taskDetailLabel.Text = string.Empty;
+        RefreshTaskStatus();
     }
 
     private void UpdateTask(string taskName, int completed, int total, string currentFileName)
@@ -519,6 +522,7 @@ public sealed class MainForm : Form
         _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, completed, total);
         _taskDetailLabel.Text = TrimTaskDetail(currentFileName);
         Cursor = Cursors.Default;
+        RefreshTaskStatus();
     }
 
     private void EndTask()
@@ -531,6 +535,13 @@ public sealed class MainForm : Form
         Cursor = Cursors.Default;
         _addButton.Enabled = true;
         _deleteButton.Enabled = true;
+    }
+
+    private void RefreshTaskStatus()
+    {
+        _taskStatusLabel.Refresh();
+        _taskDetailLabel.Refresh();
+        _taskProgressBar.Refresh();
     }
 
     private static string TrimTaskDetail(string currentFileName)

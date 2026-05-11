@@ -165,6 +165,12 @@ AssertEqual("就绪", TaskProgressFormatter.FormatIdle(), "idle task text");
 AssertEqual("正在添加图片 3/10", TaskProgressFormatter.Format("正在添加图片", 3, 10), "active task text");
 AssertEqual("正在恢复图片列表", TaskProgressFormatter.Format("正在恢复图片列表", 0, 0), "unknown total task text");
 
+var progressPolicy = new TaskProgressUpdatePolicy(total: 10_000, minimumStep: 100);
+AssertEqual(true, progressPolicy.ShouldReport(1), "first progress update is reported");
+AssertEqual(false, progressPolicy.ShouldReport(50), "small progress updates are skipped");
+AssertEqual(true, progressPolicy.ShouldReport(101), "progress update after minimum step is reported");
+AssertEqual(true, progressPolicy.ShouldReport(10_000), "final progress update is reported");
+
 var filterItems = new[]
 {
     new ImageItem(@"C:\Images\a.png", "a.png", 100, ".png"),

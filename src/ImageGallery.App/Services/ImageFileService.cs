@@ -20,12 +20,17 @@ public sealed class ImageFileService
         return Task.Run<IReadOnlyList<ImageItem>>(() =>
         {
             var items = new List<ImageItem>(paths.Length);
+            var progressPolicy = new TaskProgressUpdatePolicy(paths.Length, minimumStep: 100);
             for (var index = 0; index < paths.Length; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var item = CreateItem(paths[index]);
                 items.Add(item);
-                progress?.Report(new ImageImportProgress(index + 1, paths.Length, item.FileName));
+                var completed = index + 1;
+                if (progressPolicy.ShouldReport(completed))
+                {
+                    progress?.Report(new ImageImportProgress(completed, paths.Length, item.FileName));
+                }
             }
 
             return items;
