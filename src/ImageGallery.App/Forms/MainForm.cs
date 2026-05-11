@@ -25,9 +25,9 @@ public sealed class MainForm : Form
     private readonly Button _infoDropDownButton = new();
     private readonly ContextMenuStrip _infoDropDown = new();
     private readonly CheckedListBox _infoCheckedList = new();
-    private readonly ToolStripStatusLabel _taskStatusLabel = new();
-    private readonly ToolStripStatusLabel _taskDetailLabel = new();
-    private readonly ToolStripProgressBar _taskProgressBar = new();
+    private readonly Label _taskStatusLabel = new();
+    private readonly Label _taskDetailLabel = new();
+    private readonly ProgressBar _taskProgressBar = new();
     private readonly string _sessionFilePath = GetSessionFilePath();
     private bool _updatingInfoChoices;
     private bool _updatingTypeFilterChoices;
@@ -175,34 +175,46 @@ public sealed class MainForm : Form
         return toolbar;
     }
 
-    private StatusStrip BuildStatusBar()
+    private Control BuildStatusBar()
     {
-        var statusBar = new StatusStrip
+        var statusBar = new TableLayoutPanel
         {
-            SizingGrip = false
+            AutoSize = false,
+            BackColor = Color.FromArgb(245, 247, 250),
+            ColumnCount = 3,
+            Dock = DockStyle.Bottom,
+            Height = 28,
+            Padding = new Padding(8, 3, 8, 3),
+            RowCount = 1
         };
+        statusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        statusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        statusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184));
+        statusBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
-        _taskStatusLabel.Spring = true;
-        _taskStatusLabel.AutoSize = true;
+        _taskStatusLabel.AutoEllipsis = true;
+        _taskStatusLabel.Dock = DockStyle.Fill;
+        _taskStatusLabel.ForeColor = Color.FromArgb(46, 55, 70);
         _taskStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _taskStatusLabel.Margin = new Padding(0, 3, 8, 3);
+        _taskStatusLabel.Margin = Padding.Empty;
 
-        _taskDetailLabel.AutoSize = false;
-        _taskDetailLabel.Width = 220;
-        _taskDetailLabel.Spring = false;
+        _taskDetailLabel.AutoEllipsis = true;
+        _taskDetailLabel.Dock = DockStyle.Fill;
+        _taskDetailLabel.ForeColor = Color.FromArgb(88, 98, 112);
         _taskDetailLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _taskDetailLabel.Margin = new Padding(8, 3, 0, 3);
+        _taskDetailLabel.Margin = new Padding(8, 0, 8, 0);
 
         _taskProgressBar.Minimum = 0;
         _taskProgressBar.Maximum = 1;
         _taskProgressBar.Value = 0;
         _taskProgressBar.Visible = false;
-        _taskProgressBar.Width = 180;
+        _taskProgressBar.Dock = DockStyle.Fill;
+        _taskProgressBar.Margin = new Padding(0, 2, 0, 2);
 
-        statusBar.Items.Add(_taskStatusLabel);
-        statusBar.Items.Add(_taskDetailLabel);
-        statusBar.Items.Add(_taskProgressBar);
+        statusBar.Controls.Add(_taskStatusLabel, 0, 0);
+        statusBar.Controls.Add(_taskDetailLabel, 1, 0);
+        statusBar.Controls.Add(_taskProgressBar, 2, 0);
         return statusBar;
     }
 
@@ -485,6 +497,8 @@ public sealed class MainForm : Form
     {
         _addButton.Enabled = false;
         _deleteButton.Enabled = false;
+        UseWaitCursor = false;
+        Cursor = Cursors.Default;
         _taskProgressBar.Visible = true;
         _taskProgressBar.Minimum = 0;
         _taskProgressBar.Maximum = Math.Max(1, total);
@@ -504,6 +518,7 @@ public sealed class MainForm : Form
         _taskProgressBar.Value = Math.Clamp(completed, _taskProgressBar.Minimum, _taskProgressBar.Maximum);
         _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, completed, total);
         _taskDetailLabel.Text = TrimTaskDetail(currentFileName);
+        Cursor = Cursors.Default;
     }
 
     private void EndTask()
@@ -512,6 +527,8 @@ public sealed class MainForm : Form
         _taskProgressBar.Visible = false;
         _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
         _taskDetailLabel.Text = string.Empty;
+        UseWaitCursor = false;
+        Cursor = Cursors.Default;
         _addButton.Enabled = true;
         _deleteButton.Enabled = true;
     }
