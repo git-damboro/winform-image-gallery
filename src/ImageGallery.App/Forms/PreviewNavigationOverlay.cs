@@ -44,6 +44,17 @@ internal sealed class PreviewNavigationOverlay : Control
         Reveal();
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fadeTimer.Stop();
+            _fadeTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
     protected override void OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
@@ -108,6 +119,12 @@ internal sealed class PreviewNavigationOverlay : Control
 
     private void FadeTimerOnTick(object? sender, EventArgs e)
     {
+        if (IsDisposed || Disposing || !IsHandleCreated)
+        {
+            _fadeTimer.Stop();
+            return;
+        }
+
         if (_items.Count == 0 || _currentIndex < 0)
         {
             _opacity = 0f;
@@ -142,6 +159,11 @@ internal sealed class PreviewNavigationOverlay : Control
 
     private bool IsPointerOnPersistentArea()
     {
+        if (IsDisposed || Disposing || !IsHandleCreated)
+        {
+            return false;
+        }
+
         var client = PointToClient(Cursor.Position);
         return GetHitArea(client) is PreviewHitArea.Left or PreviewHitArea.Right;
     }
