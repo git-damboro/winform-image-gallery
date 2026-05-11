@@ -554,7 +554,7 @@ public sealed class MainForm : Form
         try
         {
             _previewForm ??= new PreviewForm();
-            _previewForm.ShowImage(item, Cursor.Position);
+            _previewForm.ShowImage(GetVisibleItems(), item, Cursor.Position);
         }
         catch (Exception ex)
         {
@@ -567,7 +567,7 @@ public sealed class MainForm : Form
         try
         {
             _pinnedPreviewForm ??= new PreviewForm();
-            _pinnedPreviewForm.ShowImage(item, Cursor.Position, pinned: true);
+            _pinnedPreviewForm.ShowImage(GetVisibleItems(), item, Cursor.Position, pinned: true);
         }
         catch (Exception ex)
         {
@@ -593,6 +593,11 @@ public sealed class MainForm : Form
     private void UpdateCountLabel()
     {
         _countLabel.Text = $"\u5171 {_items.Count:N0} \u5f20";
+    }
+
+    private IReadOnlyList<ImageItem> GetVisibleItems()
+    {
+        return ImageFilterPolicy.FilterByExtensions(_items, _galleryControl.VisibleExtensions);
     }
 
     private void SaveCurrentSession()

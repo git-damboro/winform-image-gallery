@@ -21,8 +21,9 @@ public sealed class GalleryRenderer
         int thumbnailSize)
     {
         var styleDefinition = ThumbnailStyleCatalog.Get(style);
-        var visuals = GetVisualSpec(style);
-        DrawBackground(graphics, bounds, selected, hovered, style, visuals);
+        var visuals = GetVisualSpec(style, styleDefinition.CardVisualProfile);
+
+        DrawBackground(graphics, bounds, selected, hovered, style, styleDefinition.CardVisualProfile, visuals);
 
         var padding = styleDefinition.Padding;
         var imageBounds = new Rectangle(
@@ -31,7 +32,7 @@ public sealed class GalleryRenderer
             thumbnailSize,
             thumbnailSize);
 
-        DrawThumbnail(graphics, item, thumbnail, imageBounds, visuals);
+        DrawThumbnail(graphics, item, thumbnail, imageBounds);
 
         if (infoFields != ThumbnailInfoFields.None)
         {
@@ -51,142 +52,107 @@ public sealed class GalleryRenderer
         bool selected,
         bool hovered,
         GalleryDisplayStyle style,
+        ThumbnailCardVisualProfile profile,
         ThumbnailVisualSpec visuals)
     {
         var card = Rectangle.Inflate(bounds, -1, -1);
         var borderRect = Rectangle.Inflate(card, -1, -1);
+        var radius = visuals.Radius;
+
+        DrawCardShadowLayers(graphics, card, radius, profile, visuals.ShadowColor, selected, hovered);
+
+        var surfaceAlpha = ClampByte(profile.SurfaceAlpha + (selected ? 6 : hovered ? 3 : 0));
+        using var fillBrush = new LinearGradientBrush(
+            card,
+            Color.FromArgb(surfaceAlpha, visuals.FillStart),
+            Color.FromArgb(ClampByte(surfaceAlpha - 12), visuals.FillEnd),
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(fillBrush, card, radius);
+
+        if (style == GalleryDisplayStyle.Polaroid && visuals.UseBottomBand)
+        {
+            DrawPolaroidBand(graphics, card, visuals, selected, hovered);
+        }
+
+        if (style == GalleryDisplayStyle.Glass && visuals.UseGlassOverlay)
+        {
+            DrawGlassSurface(graphics, card, visuals, profile, selected, hovered);
+        }
 
         if (style == GalleryDisplayStyle.Crystal)
         {
-            // Crystal is the premium variant: layered shadow, cool gradient fill,
-            // diagonal highlight, and stronger hover glow. Keep the layout fixed
-            // so the card feels luminous without shifting neighboring items.
-            using var shadow = new SolidBrush(Color.FromArgb(selected ? 52 : hovered ? 44 : 36, 30, 55, 90));
-            graphics.FillRoundedRectangle(shadow, new Rectangle(card.X + 2, card.Y + 3, card.Width, card.Height), visuals.Radius);
-
-            using var fill = new LinearGradientBrush(
-                card,
-                Color.FromArgb(selected ? 252 : hovered ? 249 : 247, 255, 255, 255),
-                Color.FromArgb(selected ? 226 : hovered ? 221 : 216, 224, 244, 255),
-                LinearGradientMode.Vertical);
-            graphics.FillRoundedRectangle(fill, card, visuals.Radius);
-
-            var highlight = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(10, card.Height / 3));
-            using var highBrush = new LinearGradientBrush(
-                highlight,
-                Color.FromArgb(170, 255, 255, 255),
-                Color.FromArgb(18, 255, 255, 255),
-                LinearGradientMode.Vertical);
-            graphics.FillRoundedRectangle(highBrush, highlight, visuals.Radius - 2);
-
-            using var crystalBorderBrush = new LinearGradientBrush(
-                borderRect,
-                selected ? Color.FromArgb(125, 72, 165, 255) : Color.FromArgb(160, 143, 196, 255),
-                selected ? Color.FromArgb(70, 188, 255, 255) : Color.FromArgb(130, 180, 210, 248),
-                LinearGradientMode.Horizontal);
-            using var border = new Pen(crystalBorderBrush, selected ? 2.2f : hovered ? 1.8f : 1.35f);
-            graphics.DrawRoundedRectangle(border, card, visuals.Radius);
-
-            if (hovered && !selected)
-            {
-                using var hoverPen = new Pen(Color.FromArgb(140, 102, 180, 255), 1.5f);
-                graphics.DrawRoundedRectangle(hoverPen, Rectangle.Inflate(card, -2, -2), visuals.Radius - 2);
-            }
-
-            return;
+            // Crystal is intentionally the strongest card-level glass effect:
+            // colder surface, brighter sheen, and a more obvious edge glow.
+            DrawCrystalSurface(graphics, card, visuals, profile, selected, hovered);
         }
 
-        if (visuals.DrawShadow)
+        if (style == GalleryDisplayStyle.Neon && visuals.UseHighlight)
         {
-            using var shadowBrush = new SolidBrush(Color.FromArgb(selected ? 42 : hovered ? 34 : 28, visuals.ShadowColor));
-            graphics.FillRoundedRectangle(shadowBrush, new Rectangle(card.X + 2, card.Y + 3, card.Width, card.Height), visuals.Radius);
+            DrawNeonSurface(graphics, card, visuals, profile, selected, hovered);
         }
 
-        using var fillBrush = new LinearGradientBrush(
-            card,
-            selected ? Color.FromArgb(248, visuals.FillStart) : hovered ? Color.FromArgb(250, visuals.FillStart) : visuals.FillStart,
-            selected ? Color.FromArgb(232, visuals.FillEnd) : hovered ? Color.FromArgb(236, visuals.FillEnd) : visuals.FillEnd,
-            LinearGradientMode.Vertical);
-        graphics.FillRoundedRectangle(fillBrush, card, visuals.Radius);
-
-        if (visuals.UseGlassOverlay)
+        if (visuals.UseHighlight && style != GalleryDisplayStyle.Crystal && style != GalleryDisplayStyle.Neon)
         {
-            var glassRect = new Rectangle(card.X + 1, card.Y + 1, card.Width - 2, Math.Max(12, card.Height / 2));
-            using var glassBrush = new LinearGradientBrush(
-                glassRect,
-                Color.FromArgb(150, visuals.HighlightColor),
-                Color.FromArgb(14, visuals.HighlightColor),
-                LinearGradientMode.Vertical);
-            graphics.FillRoundedRectangle(glassBrush, glassRect, Math.Max(2, visuals.Radius - 2));
+            DrawSoftHighlight(graphics, card, visuals, profile, selected, hovered);
         }
 
-        if (visuals.UseBottomBand)
-        {
-            var bandHeight = Math.Max(14, card.Height / 7);
-            var bandRect = new Rectangle(card.X + 1, card.Bottom - bandHeight - 1, card.Width - 2, bandHeight);
-            using var bandBrush = new SolidBrush(Color.FromArgb(visuals.BottomBandColor.A, visuals.BottomBandColor));
-            graphics.FillRoundedRectangle(bandBrush, bandRect, Math.Max(2, visuals.Radius - 2));
-        }
-
-        if (visuals.UseHighlight)
-        {
-            var highlightRect = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(10, card.Height / 3));
-            using var highlightBrush = new LinearGradientBrush(
-                highlightRect,
-                Color.FromArgb(selected ? 176 : hovered ? 168 : 156, visuals.HighlightColor),
-                Color.FromArgb(12, visuals.HighlightColor),
-                LinearGradientMode.Vertical);
-            graphics.FillRoundedRectangle(highlightBrush, highlightRect, Math.Max(2, visuals.Radius - 2));
-        }
-
-        var borderStart = selected
-            ? Color.FromArgb(Math.Min(255, (int)(visuals.BorderStart.A * 1.1f)), visuals.BorderStart)
-            : visuals.BorderStart;
-        var borderEnd = hovered
-            ? Color.FromArgb(Math.Min(255, (int)(visuals.BorderEnd.A * 1.08f)), visuals.BorderEnd)
-            : visuals.BorderEnd;
-
-        using var borderBrush = new LinearGradientBrush(borderRect, borderStart, borderEnd, LinearGradientMode.Horizontal);
+        using var borderBrush = new LinearGradientBrush(
+            borderRect,
+            Color.FromArgb(ClampByte(profile.BorderAlpha), visuals.BorderStart),
+            Color.FromArgb(ClampByte(profile.BorderAlpha), visuals.BorderEnd),
+            LinearGradientMode.Horizontal);
         using var borderPen = new Pen(borderBrush, visuals.BorderThickness + (selected ? 1 : hovered ? 1 : 0));
-        graphics.DrawRoundedRectangle(borderPen, card, visuals.Radius);
+        graphics.DrawRoundedRectangle(borderPen, card, radius);
 
-        if (visuals.UseGlow || hovered || selected)
+        if (visuals.UseGlow && profile.BorderGlowAlpha > 0)
         {
-            var glowRect = Rectangle.Inflate(card, -2, -2);
-            using var glowPen = new Pen(Color.FromArgb(selected ? 85 : hovered ? 70 : 45, visuals.GlowColor), visuals.BorderThickness + 1.5f);
-            graphics.DrawRoundedRectangle(glowPen, glowRect, Math.Max(2, visuals.Radius - 2));
+            DrawBorderGlow(graphics, card, radius, visuals.GlowColor, profile.BorderGlowAlpha, selected, hovered);
         }
     }
 
-    private static void DrawThumbnail(Graphics graphics, ImageItem item, Image? thumbnail, Rectangle imageBounds, ThumbnailVisualSpec visuals)
+    private static void DrawThumbnail(
+        Graphics graphics,
+        ImageItem item,
+        Image? thumbnail,
+        Rectangle imageBounds)
     {
-        var imageBackground = visuals.UseGlassOverlay
-            ? Color.FromArgb(232, 240, 248)
-            : visuals.UseGlow
-                ? Color.FromArgb(239, 242, 251)
-                : Color.FromArgb(238, 241, 245);
+        var contentBounds = Rectangle.Inflate(imageBounds, -1, -1);
+        var radius = Math.Max(2, Math.Min(4, Math.Min(contentBounds.Width, contentBounds.Height) / 8));
 
-        using var backgroundBrush = new SolidBrush(imageBackground);
-        graphics.FillRectangle(backgroundBrush, imageBounds);
-
-        if (thumbnail != null)
+        using var clipPath = RoundedRectangleGraphicsExtensions.CreateRoundedRectanglePath(contentBounds, radius);
+        var state = graphics.Save();
+        try
         {
-            graphics.DrawImage(thumbnail, imageBounds);
+            graphics.SetClip(clipPath);
+
+            using var backgroundBrush = new SolidBrush(Color.FromArgb(248, 250, 252));
+            graphics.FillPath(backgroundBrush, clipPath);
+
+            if (thumbnail != null)
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.DrawImage(thumbnail, contentBounds);
+            }
+            else
+            {
+                var text = item.HasError ? "\u65e0\u6cd5\u52a0\u8f7d" : "\u52a0\u8f7d\u4e2d";
+                TextRenderer.DrawText(
+                    graphics,
+                    text,
+                    SystemFonts.MessageBoxFont,
+                    contentBounds,
+                    item.HasError ? Color.FromArgb(176, 50, 50) : Color.FromArgb(96, 104, 116),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            }
         }
-        else
+        finally
         {
-            var text = item.HasError ? "\u65e0\u6cd5\u52a0\u8f7d" : "\u52a0\u8f7d\u4e2d";
-            TextRenderer.DrawText(
-                graphics,
-                text,
-                SystemFonts.MessageBoxFont,
-                imageBounds,
-                item.HasError ? Color.FromArgb(176, 50, 50) : Color.FromArgb(96, 104, 116),
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            graphics.Restore(state);
         }
 
-        using var border = new Pen(visuals.ImageBorderColor);
-        graphics.DrawRectangle(border, imageBounds);
+        using var border = new Pen(Color.FromArgb(120, 208, 214, 222));
+        graphics.DrawPath(border, clipPath);
     }
 
     private static void DrawMetadata(
@@ -215,13 +181,13 @@ public sealed class GalleryRenderer
         }
     }
 
-    private static ThumbnailVisualSpec GetVisualSpec(GalleryDisplayStyle style)
+    private static ThumbnailVisualSpec GetVisualSpec(GalleryDisplayStyle style, ThumbnailCardVisualProfile profile)
     {
         return style switch
         {
             GalleryDisplayStyle.Rounded => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 255),
-                FillEnd: Color.FromArgb(240, 244, 248),
+                FillEnd: Color.FromArgb(241, 245, 249),
                 BorderStart: Color.FromArgb(194, 205, 218),
                 BorderEnd: Color.FromArgb(172, 190, 210),
                 GlowColor: Color.FromArgb(112, 144, 196),
@@ -230,29 +196,25 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 16,
                 BorderThickness: 1,
-                DrawShadow: true,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(206, 213, 223)),
+                UseGlassOverlay: false),
             GalleryDisplayStyle.Shadow => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 255),
                 FillEnd: Color.FromArgb(235, 239, 244),
                 BorderStart: Color.FromArgb(204, 211, 222),
                 BorderEnd: Color.FromArgb(181, 191, 205),
                 GlowColor: Color.FromArgb(108, 129, 165),
-                ShadowColor: Color.FromArgb(55, 26, 34, 50),
+                ShadowColor: Color.FromArgb(58, 26, 34, 50),
                 HighlightColor: Color.FromArgb(140, 255, 255, 255),
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 10,
                 BorderThickness: 1,
-                DrawShadow: true,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(206, 213, 223)),
+                UseGlassOverlay: false),
             GalleryDisplayStyle.Border => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 255),
                 FillEnd: Color.FromArgb(248, 250, 252),
@@ -264,12 +226,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 4,
                 BorderThickness: 2,
-                DrawShadow: false,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(130, 150, 176)),
+                UseGlassOverlay: false),
             GalleryDisplayStyle.Polaroid => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 252),
                 FillEnd: Color.FromArgb(246, 244, 239),
@@ -281,12 +241,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(255, 249, 246, 240),
                 Radius: 4,
                 BorderThickness: 1,
-                DrawShadow: true,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: true,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(206, 201, 190)),
+                UseGlassOverlay: false),
             GalleryDisplayStyle.Glass => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(236, 246, 255),
                 FillEnd: Color.FromArgb(214, 231, 250),
@@ -298,12 +256,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 12,
                 BorderThickness: 1,
-                DrawShadow: true,
                 UseHighlight: true,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: true,
-                ImageBorderColor: Color.FromArgb(176, 198, 224)),
+                UseGlassOverlay: true),
             GalleryDisplayStyle.Crystal => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(247, 252, 255),
                 FillEnd: Color.FromArgb(217, 232, 250),
@@ -315,12 +271,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 12,
                 BorderThickness: 2,
-                DrawShadow: true,
                 UseHighlight: true,
                 UseGlow: true,
                 UseBottomBand: false,
-                UseGlassOverlay: true,
-                ImageBorderColor: Color.FromArgb(184, 206, 236)),
+                UseGlassOverlay: true),
             GalleryDisplayStyle.Neon => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(244, 240, 255),
                 FillEnd: Color.FromArgb(230, 226, 250),
@@ -332,12 +286,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 12,
                 BorderThickness: 2,
-                DrawShadow: true,
                 UseHighlight: true,
                 UseGlow: true,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(148, 138, 235)),
+                UseGlassOverlay: false),
             GalleryDisplayStyle.Minimal => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 255),
                 FillEnd: Color.FromArgb(250, 251, 253),
@@ -349,12 +301,10 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 4,
                 BorderThickness: 1,
-                DrawShadow: false,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(210, 216, 224)),
+                UseGlassOverlay: false),
             _ => new ThumbnailVisualSpec(
                 FillStart: Color.FromArgb(255, 255, 255),
                 FillEnd: Color.FromArgb(245, 248, 252),
@@ -366,13 +316,150 @@ public sealed class GalleryRenderer
                 BottomBandColor: Color.FromArgb(0, 0, 0, 0),
                 Radius: 6,
                 BorderThickness: 1,
-                DrawShadow: false,
                 UseHighlight: false,
                 UseGlow: false,
                 UseBottomBand: false,
-                UseGlassOverlay: false,
-                ImageBorderColor: Color.FromArgb(210, 216, 224))
+                UseGlassOverlay: false)
         };
+    }
+
+    private static void DrawCardShadowLayers(
+        Graphics graphics,
+        Rectangle card,
+        int radius,
+        ThumbnailCardVisualProfile profile,
+        Color shadowColor,
+        bool selected,
+        bool hovered)
+    {
+        if (profile.ShadowAlpha <= 0)
+        {
+            return;
+        }
+
+        var layerCount = Math.Max(2, Math.Min(7, (profile.ShadowBlurPx + 2) / 3));
+        for (var layer = layerCount; layer >= 1; layer--)
+        {
+            var alpha = ClampByte(profile.ShadowAlpha * layer / (layerCount + 1));
+            alpha = ClampByte(alpha + (selected ? 12 : hovered ? 6 : 0));
+
+            var spread = Math.Max(0, layer - 1);
+            var shadowRect = Rectangle.Inflate(card, spread, spread);
+            shadowRect.Offset(1 + layer / 4, 2 + layer);
+
+            using var brush = new SolidBrush(Color.FromArgb(alpha, shadowColor));
+            graphics.FillRoundedRectangle(brush, shadowRect, radius + Math.Min(4, layer / 2));
+        }
+    }
+
+    private static void DrawPolaroidBand(Graphics graphics, Rectangle card, ThumbnailVisualSpec visuals, bool selected, bool hovered)
+    {
+        var bandHeight = Math.Max(12, card.Height / 5);
+        var bandRect = new Rectangle(card.X + 1, card.Bottom - bandHeight - 1, card.Width - 2, bandHeight);
+        using var bandBrush = new LinearGradientBrush(
+            bandRect,
+            selected ? Color.FromArgb(255, 255, 250, 244) : hovered ? Color.FromArgb(255, 253, 250, 245) : Color.FromArgb(255, 250, 247, 240),
+            visuals.BottomBandColor,
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(bandBrush, bandRect, Math.Max(2, visuals.Radius - 2));
+    }
+
+    private static void DrawGlassSurface(
+        Graphics graphics,
+        Rectangle card,
+        ThumbnailVisualSpec visuals,
+        ThumbnailCardVisualProfile profile,
+        bool selected,
+        bool hovered)
+    {
+        var sheenRect = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(12, card.Height / 2));
+        using var sheenBrush = new LinearGradientBrush(
+            sheenRect,
+            Color.FromArgb(ClampByte(profile.BorderGlowAlpha + (selected ? 24 : hovered ? 16 : 8)), 255, 255, 255),
+            Color.FromArgb(14, 210, 235, 255),
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(sheenBrush, sheenRect, Math.Max(2, visuals.Radius - 2));
+    }
+
+    private static void DrawCrystalSurface(
+        Graphics graphics,
+        Rectangle card,
+        ThumbnailVisualSpec visuals,
+        ThumbnailCardVisualProfile profile,
+        bool selected,
+        bool hovered)
+    {
+        var sheenRect = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(14, card.Height / 2));
+        using var sheenBrush = new LinearGradientBrush(
+            sheenRect,
+            Color.FromArgb(ClampByte(profile.BorderGlowAlpha + (selected ? 42 : hovered ? 28 : 18)), 255, 255, 255),
+            Color.FromArgb(18, 198, 228, 255),
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(sheenBrush, sheenRect, Math.Max(2, visuals.Radius - 2));
+
+        var beamRect = new Rectangle(card.X + card.Width / 6, card.Y + 1, Math.Max(1, card.Width / 3), Math.Max(1, card.Height - 2));
+        using var beamBrush = new LinearGradientBrush(
+            beamRect,
+            Color.FromArgb(70, 170, 214, 255),
+            Color.FromArgb(0, 170, 214, 255),
+            LinearGradientMode.Horizontal);
+        graphics.FillRoundedRectangle(beamBrush, beamRect, Math.Max(2, visuals.Radius - 2));
+    }
+
+    private static void DrawNeonSurface(
+        Graphics graphics,
+        Rectangle card,
+        ThumbnailVisualSpec visuals,
+        ThumbnailCardVisualProfile profile,
+        bool selected,
+        bool hovered)
+    {
+        var sheenRect = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(12, card.Height / 3));
+        using var sheenBrush = new LinearGradientBrush(
+            sheenRect,
+            Color.FromArgb(ClampByte(profile.BorderGlowAlpha + (selected ? 30 : hovered ? 18 : 10)), 255, 255, 255),
+            Color.FromArgb(12, 240, 230, 255),
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(sheenBrush, sheenRect, Math.Max(2, visuals.Radius - 2));
+    }
+
+    private static void DrawSoftHighlight(
+        Graphics graphics,
+        Rectangle card,
+        ThumbnailVisualSpec visuals,
+        ThumbnailCardVisualProfile profile,
+        bool selected,
+        bool hovered)
+    {
+        var highlightRect = new Rectangle(card.X + 2, card.Y + 2, card.Width - 4, Math.Max(10, card.Height / 3));
+        using var highlightBrush = new LinearGradientBrush(
+            highlightRect,
+            Color.FromArgb(ClampByte(profile.BorderGlowAlpha + (selected ? 14 : hovered ? 10 : 4)), visuals.HighlightColor),
+            Color.FromArgb(8, visuals.HighlightColor),
+            LinearGradientMode.Vertical);
+        graphics.FillRoundedRectangle(highlightBrush, highlightRect, Math.Max(2, visuals.Radius - 2));
+    }
+
+    private static void DrawBorderGlow(
+        Graphics graphics,
+        Rectangle card,
+        int radius,
+        Color glowColor,
+        int glowAlpha,
+        bool selected,
+        bool hovered)
+    {
+        var alpha = ClampByte(glowAlpha + (selected ? 18 : hovered ? 12 : 0));
+        using var outerPen = new Pen(Color.FromArgb(alpha, glowColor), 2.2f);
+        graphics.DrawRoundedRectangle(outerPen, Rectangle.Inflate(card, 1, 1), Math.Max(2, radius - 1));
+
+        using var innerPen = new Pen(Color.FromArgb(ClampByte(alpha / 2), glowColor), 4f);
+        graphics.DrawRoundedRectangle(innerPen, Rectangle.Inflate(card, 2, 2), Math.Max(2, radius - 1));
+    }
+
+    private static int ClampByte(int value)
+    {
+        return Math.Clamp(value, 0, 255);
     }
 }
 
@@ -387,12 +474,10 @@ internal readonly record struct ThumbnailVisualSpec(
     Color BottomBandColor,
     int Radius,
     int BorderThickness,
-    bool DrawShadow,
     bool UseHighlight,
     bool UseGlow,
     bool UseBottomBand,
-    bool UseGlassOverlay,
-    Color ImageBorderColor);
+    bool UseGlassOverlay);
 
 internal static class RoundedRectangleGraphicsExtensions
 {
@@ -408,7 +493,7 @@ internal static class RoundedRectangleGraphicsExtensions
         graphics.DrawPath(pen, path);
     }
 
-    private static GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
+    public static GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
     {
         var diameter = radius * 2;
         var path = new GraphicsPath();

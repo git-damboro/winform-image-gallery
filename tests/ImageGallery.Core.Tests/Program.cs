@@ -110,6 +110,34 @@ AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Neon), "neon style ex
 AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Minimal), "minimal style exists");
 AssertEqual(9, styleValues.Distinct().Count(), "style count");
 
+AssertEqual(GalleryDisplayStyle.Minimal, ThumbnailStyleCatalog.ResolveVisibleStyle(GalleryDisplayStyle.Compact), "compact resolves to minimal");
+
+var compactStyle = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Compact);
+var minimalStyle = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Minimal);
+AssertEqual(GalleryDisplayStyle.Compact, compactStyle.Value, "compact fallback value");
+AssertEqual(compactStyle.CardVisualProfile, minimalStyle.CardVisualProfile, "compact fallback profile matches minimal");
+
+var glassProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Glass).CardVisualProfile;
+var crystalProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Crystal).CardVisualProfile;
+var shadowProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Shadow).CardVisualProfile;
+
+AssertEqual(
+    true,
+    crystalProfile.BorderGlowAlpha > glassProfile.BorderGlowAlpha,
+    "crystal glow stronger than glass");
+AssertEqual(
+    true,
+    crystalProfile.BorderAlpha > glassProfile.BorderAlpha,
+    "crystal border opacity stronger than glass");
+AssertEqual(
+    true,
+    shadowProfile.ShadowAlpha > glassProfile.ShadowAlpha,
+    "shadow stronger than glass");
+AssertEqual(
+    true,
+    shadowProfile.ShadowBlurPx > crystalProfile.ShadowBlurPx,
+    "shadow blur stronger than crystal");
+
 sessionStore.Save(sessionFile, new[] { @"C:\Images\a.jpg" }, GalleryDisplayStyle.Crystal);
 var savedState = sessionStore.LoadState(sessionFile);
 AssertEqual(GalleryDisplayStyle.Crystal, savedState.DisplayStyle, "saved style round trip");
@@ -148,5 +176,9 @@ AssertEqual(3, multiFiltered.Count, "multi extension filter count");
 var filterSelection = new SelectionManager();
 filterSelection.SelectAll(filtered.Count);
 AssertSequence(new[] { 1, 0 }, filterSelection.GetSelectedIndexesDescending(), "select all filtered items");
+
+AssertEqual(1, PreviewNavigationPolicy.Move(0, 3, 1), "next index");
+AssertEqual(2, PreviewNavigationPolicy.Move(0, 3, -1), "previous wraps");
+AssertEqual(-1, PreviewNavigationPolicy.Move(0, 0, 1), "empty list");
 
 Console.WriteLine("All core tests passed.");

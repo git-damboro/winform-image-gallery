@@ -1,5 +1,12 @@
 namespace ImageGallery.Core.Models;
 
+public readonly record struct ThumbnailCardVisualProfile(
+    int SurfaceAlpha,
+    int BorderAlpha,
+    int BorderGlowAlpha,
+    int ShadowAlpha,
+    int ShadowBlurPx);
+
 public sealed record ThumbnailStyleDefinition(
     GalleryDisplayStyle Value,
     string Label,
@@ -8,4 +15,5 @@ public sealed record ThumbnailStyleDefinition(
     int Gap,
     int TextTopSpacing,
     int TextLineHeight,
-    int CornerRadius);
+    int CornerRadius,
+    ThumbnailCardVisualProfile CardVisualProfile);
