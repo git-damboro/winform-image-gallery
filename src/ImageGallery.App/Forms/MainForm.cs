@@ -183,11 +183,14 @@ public sealed class MainForm : Form
         };
 
         _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
-        _taskStatusLabel.Spring = true;
+        _taskStatusLabel.Spring = false;
+        _taskStatusLabel.AutoSize = true;
         _taskStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _taskStatusLabel.Margin = new Padding(0, 3, 8, 3);
 
         _taskDetailLabel.AutoSize = false;
         _taskDetailLabel.Width = 260;
+        _taskDetailLabel.Spring = true;
         _taskDetailLabel.TextAlign = ContentAlignment.MiddleLeft;
         _taskDetailLabel.Margin = new Padding(8, 3, 0, 3);
 
