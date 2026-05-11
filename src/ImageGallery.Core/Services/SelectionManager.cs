@@ -61,6 +61,17 @@ public sealed class SelectionManager
         _anchorIndex = index;
     }
 
+    public void SelectAll(int itemCount)
+    {
+        _selectedIndexes.Clear();
+        for (var index = 0; index < itemCount; index++)
+        {
+            _selectedIndexes.Add(index);
+        }
+
+        _anchorIndex = itemCount > 0 ? 0 : null;
+    }
+
     public IReadOnlyList<int> GetSelectedIndexesDescending()
     {
         return _selectedIndexes.Reverse().ToArray();

@@ -19,9 +19,14 @@ public sealed class ImageGalleryControl : UserControl
     private readonly System.Windows.Forms.Timer _hoverTimer = new();
 
     private GalleryLayout _layout = GalleryLayoutCalculator.Calculate(0, 1, 1, 0, 0, DefaultLayoutOptions);
+    private readonly List<int> _visibleItemIndexes = new();
     private int _hoverIndex = -1;
+    private int _scrollX;
+    private int _scrollY;
     private int _thumbnailSize = 128;
     private GalleryDisplayStyle _displayStyle = GalleryDisplayStyle.Crystal;
+    private ThumbnailInfoFields _thumbnailInfoFields = ThumbnailInfoFields.All;
+    private HashSet<string> _visibleExtensions = new(StringComparer.OrdinalIgnoreCase);
 
     private static GalleryLayoutOptions DefaultLayoutOptions => new(128, 56, 10, 14);
 
@@ -36,8 +41,10 @@ public sealed class ImageGalleryControl : UserControl
         Controls.Add(_verticalScrollBar);
         Controls.Add(_horizontalScrollBar);
 
-        _verticalScrollBar.Scroll += (_, _) => InvalidateCanvas();
-        _horizontalScrollBar.Scroll += (_, _) => InvalidateCanvas();
+        _verticalScrollBar.Scroll += (_, e) => ScrollTo(_scrollX, e.NewValue);
+        _horizontalScrollBar.Scroll += (_, e) => ScrollTo(e.NewValue, _scrollY);
+        _verticalScrollBar.ValueChanged += (_, _) => ScrollTo(_scrollX, _verticalScrollBar.Value);
+        _horizontalScrollBar.ValueChanged += (_, _) => ScrollTo(_horizontalScrollBar.Value, _scrollY);
 
         _hoverTimer.Interval = 450;
         _hoverTimer.Tick += HoverTimerOnTick;
@@ -79,7 +86,38 @@ public sealed class ImageGalleryControl : UserControl
             }
 
             _displayStyle = value;
-            InvalidateCanvas();
+            RecalculateLayout();
+        }
+    }
+
+    public ThumbnailInfoFields ThumbnailInfoFields
+    {
+        get => _thumbnailInfoFields;
+        set
+        {
+            if (_thumbnailInfoFields == value)
+            {
+                return;
+            }
+
+            _thumbnailInfoFields = value;
+            RecalculateLayout();
+        }
+    }
+
+    public IReadOnlyCollection<string> VisibleExtensions
+    {
+        get => _visibleExtensions;
+        set
+        {
+            var normalized = new HashSet<string>(ImageFilterPolicy.NormalizeExtensions(value), StringComparer.OrdinalIgnoreCase);
+            if (_visibleExtensions.SetEquals(normalized))
+            {
+                return;
+            }
+
+            _visibleExtensions = normalized;
+            RebuildVisibleItems(clearSelection: true);
         }
     }
 
@@ -104,29 +142,100 @@ public sealed class ImageGalleryControl : UserControl
     {
         _items.Clear();
         _items.AddRange(items);
-        _selectionManager.Clear();
         _hoverIndex = -1;
-        RecalculateLayout();
+        RebuildVisibleItems(clearSelection: true);
     }
 
     public IReadOnlyList<int> GetSelectedIndexesDescending()
     {
-        return _selectionManager.GetSelectedIndexesDescending();
+        return _selectionManager
+            .GetSelectedIndexesDescending()
+            .Select(visibleIndex => _visibleItemIndexes[visibleIndex])
+            .ToArray();
     }
 
     public void RemoveSelectedIndexes(IEnumerable<int> indexes)
     {
-        _selectionManager.RemoveIndexes(indexes);
+        _selectionManager.Clear();
+        InvalidateCanvas();
+    }
+
+    public void SelectAllVisible()
+    {
+        _selectionManager.SelectAll(_visibleItemIndexes.Count);
         InvalidateCanvas();
     }
 
     private GalleryLayoutOptions CreateLayoutOptions()
     {
-        var textAreaHeight = DisplayStyle == GalleryDisplayStyle.Compact ? 44 : 58;
-        var padding = DisplayStyle == GalleryDisplayStyle.Compact ? 6 : 10;
-        var gap = DisplayStyle == GalleryDisplayStyle.Compact ? 8 : 14;
+        var style = ThumbnailStyleCatalog.Get(DisplayStyle);
+        return new GalleryLayoutOptions(
+            _thumbnailSize,
+            CalculateTextAreaHeight(style),
+            style.Padding,
+            style.Gap);
+    }
 
-        return new GalleryLayoutOptions(_thumbnailSize, textAreaHeight, padding, gap);
+    private int CalculateTextAreaHeight(ThumbnailStyleDefinition style)
+    {
+        if (_thumbnailInfoFields == ThumbnailInfoFields.None)
+        {
+            return 0;
+        }
+
+        var lineCount = CountSelectedInfoFields(_thumbnailInfoFields);
+        return style.TextTopSpacing + lineCount * style.TextLineHeight;
+    }
+
+    private static int CountSelectedInfoFields(ThumbnailInfoFields fields)
+    {
+        var count = 0;
+        if (fields.HasFlag(ThumbnailInfoFields.FileName))
+        {
+            count++;
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.FileSize))
+        {
+            count++;
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.ImageType))
+        {
+            count++;
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.Dimensions))
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private void RebuildVisibleItems(bool clearSelection)
+    {
+        _visibleItemIndexes.Clear();
+        for (var index = 0; index < _items.Count; index++)
+        {
+            if (IsVisibleItem(_items[index]))
+            {
+                _visibleItemIndexes.Add(index);
+            }
+        }
+
+        if (clearSelection)
+        {
+            _selectionManager.Clear();
+            _hoverIndex = -1;
+        }
+
+        RecalculateLayout();
+    }
+
+    private bool IsVisibleItem(ImageItem item)
+    {
+        return _visibleExtensions.Count == 0 || _visibleExtensions.Contains(ImageFilterPolicy.NormalizeExtension(item.Extension));
     }
 
     private void RecalculateLayout()
@@ -138,11 +247,11 @@ public sealed class ImageGalleryControl : UserControl
         var viewportHeight = Math.Max(1, Height - hHeight);
 
         _layout = GalleryLayoutCalculator.Calculate(
-            _items.Count,
+            _visibleItemIndexes.Count,
             viewportWidth,
             viewportHeight,
-            _horizontalScrollBar.Value,
-            _verticalScrollBar.Value,
+            _scrollX,
+            _scrollY,
             CreateLayoutOptions());
 
         var needsVertical = _layout.TotalHeight > viewportHeight;
@@ -152,22 +261,24 @@ public sealed class ImageGalleryControl : UserControl
         viewportHeight = Math.Max(1, Height - (needsHorizontal ? hHeight : 0));
 
         _layout = GalleryLayoutCalculator.Calculate(
-            _items.Count,
+            _visibleItemIndexes.Count,
             viewportWidth,
             viewportHeight,
-            _horizontalScrollBar.Value,
-            _verticalScrollBar.Value,
+            _scrollX,
+            _scrollY,
             CreateLayoutOptions());
 
         ConfigureScrollBar(_verticalScrollBar, _layout.TotalHeight, viewportHeight);
         ConfigureScrollBar(_horizontalScrollBar, _layout.TotalWidth, viewportWidth);
+        _scrollY = SetScrollBarValue(_verticalScrollBar, _scrollY);
+        _scrollX = SetScrollBarValue(_horizontalScrollBar, _scrollX);
 
         _layout = GalleryLayoutCalculator.Calculate(
-            _items.Count,
+            _visibleItemIndexes.Count,
             viewportWidth,
             viewportHeight,
-            _horizontalScrollBar.Value,
-            _verticalScrollBar.Value,
+            _scrollX,
+            _scrollY,
             CreateLayoutOptions());
 
         _canvas.Bounds = new Rectangle(0, 0, viewportWidth, viewportHeight);
@@ -190,12 +301,63 @@ public sealed class ImageGalleryControl : UserControl
         scrollBar.LargeChange = Math.Max(1, viewportSize);
         scrollBar.SmallChange = 48;
         scrollBar.Maximum = Math.Max(0, contentSize - 1);
+    }
 
-        var maxValue = Math.Max(0, scrollBar.Maximum - scrollBar.LargeChange + 1);
-        if (scrollBar.Value > maxValue)
+    private static int SetScrollBarValue(ScrollBar scrollBar, int value)
+    {
+        if (!scrollBar.Visible)
         {
-            scrollBar.Value = maxValue;
+            scrollBar.Value = 0;
+            return 0;
         }
+
+        var clampedValue = ClampScrollValue(scrollBar, value);
+        if (scrollBar.Value != clampedValue)
+        {
+            scrollBar.Value = clampedValue;
+        }
+
+        return clampedValue;
+    }
+
+    private static int ClampScrollValue(ScrollBar scrollBar, int value)
+    {
+        var maxValue = Math.Max(0, scrollBar.Maximum - scrollBar.LargeChange + 1);
+        return Math.Clamp(value, scrollBar.Minimum, maxValue);
+    }
+
+    private void ScrollTo(int scrollX, int scrollY)
+    {
+        _scrollX = SetScrollBarValue(_horizontalScrollBar, scrollX);
+        _scrollY = SetScrollBarValue(_verticalScrollBar, scrollY);
+        RecalculateVisibleLayout();
+    }
+
+    private void CanvasOnMouseWheel(MouseEventArgs e)
+    {
+        if (!_verticalScrollBar.Visible || e.Delta == 0)
+        {
+            return;
+        }
+
+        var scrollLines = SystemInformation.MouseWheelScrollLines;
+        var lineCount = scrollLines <= 0 ? 3 : scrollLines;
+        var wheelSteps = Math.Max(1, Math.Abs(e.Delta) / 120);
+        var delta = Math.Sign(e.Delta) * lineCount * _verticalScrollBar.SmallChange * wheelSteps;
+        ScrollTo(_scrollX, _scrollY - delta);
+    }
+
+    private void RecalculateVisibleLayout()
+    {
+        _layout = GalleryLayoutCalculator.Calculate(
+            _items.Count,
+            Math.Max(1, _canvas.Width),
+            Math.Max(1, _canvas.Height),
+            _scrollX,
+            _scrollY,
+            CreateLayoutOptions());
+
+        InvalidateCanvas();
     }
 
     private void InvalidateCanvas()
@@ -215,7 +377,7 @@ public sealed class ImageGalleryControl : UserControl
         e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        if (_items.Count == 0 || _layout.VisibleRange.IsEmpty)
+        if (_visibleItemIndexes.Count == 0 || _layout.VisibleRange.IsEmpty)
         {
             TextRenderer.DrawText(
                 e.Graphics,
@@ -231,8 +393,8 @@ public sealed class ImageGalleryControl : UserControl
         {
             var itemRect = _layout.GetItemRect(index);
             var screenRect = new Rectangle(
-                itemRect.X - _horizontalScrollBar.Value,
-                itemRect.Y - _verticalScrollBar.Value,
+                itemRect.X - _scrollX,
+                itemRect.Y - _scrollY,
                 itemRect.Width,
                 itemRect.Height);
 
@@ -241,7 +403,7 @@ public sealed class ImageGalleryControl : UserControl
                 continue;
             }
 
-            var item = _items[index];
+            var item = _items[_visibleItemIndexes[index]];
             var thumbnail = _thumbnailService.GetOrQueue(item, _thumbnailSize, InvalidateCanvas);
             _renderer.DrawCard(
                 e.Graphics,
@@ -252,6 +414,7 @@ public sealed class ImageGalleryControl : UserControl
                 _selectionManager.IsSelected(index),
                 index == _hoverIndex,
                 DisplayStyle,
+                _thumbnailInfoFields,
                 _thumbnailSize);
         }
     }
@@ -270,7 +433,7 @@ public sealed class ImageGalleryControl : UserControl
         var modifiers = ModifierKeys;
         _selectionManager.Select(
             index,
-            _items.Count,
+            _visibleItemIndexes.Count,
             ctrl: modifiers.HasFlag(Keys.Control),
             shift: modifiers.HasFlag(Keys.Shift));
 
@@ -313,7 +476,7 @@ public sealed class ImageGalleryControl : UserControl
         var index = HitTest(e.Location);
         if (index >= 0)
         {
-            ImageOpenRequested?.Invoke(this, _items[index]);
+            ImageOpenRequested?.Invoke(this, _items[_visibleItemIndexes[index]]);
         }
     }
 
@@ -321,15 +484,15 @@ public sealed class ImageGalleryControl : UserControl
     {
         _hoverTimer.Stop();
 
-        if (_hoverIndex >= 0 && _hoverIndex < _items.Count)
+        if (_hoverIndex >= 0 && _hoverIndex < _visibleItemIndexes.Count)
         {
-            PreviewRequested?.Invoke(this, _items[_hoverIndex]);
+            PreviewRequested?.Invoke(this, _items[_visibleItemIndexes[_hoverIndex]]);
         }
     }
 
     private int HitTest(Point point)
     {
-        return _layout.IndexFromPoint(point.X + _horizontalScrollBar.Value, point.Y + _verticalScrollBar.Value);
+        return _layout.IndexFromPoint(point.X + _scrollX, point.Y + _scrollY);
     }
 
     private sealed class GalleryCanvas : Control
@@ -339,10 +502,12 @@ public sealed class ImageGalleryControl : UserControl
         public GalleryCanvas(ImageGalleryControl owner)
         {
             _owner = owner;
+            TabStop = true;
             SetStyle(
                 ControlStyles.AllPaintingInWmPaint
                 | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.UserPaint
+                | ControlStyles.Selectable
                 | ControlStyles.ResizeRedraw,
                 true);
         }
@@ -356,7 +521,14 @@ public sealed class ImageGalleryControl : UserControl
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            Focus();
             _owner.CanvasOnMouseDown(e);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            Focus();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -375,6 +547,23 @@ public sealed class ImageGalleryControl : UserControl
         {
             base.OnMouseDoubleClick(e);
             _owner.CanvasOnDoubleClick(e);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.A))
+            {
+                _owner.SelectAllVisible();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            _owner.CanvasOnMouseWheel(e);
         }
     }
 }

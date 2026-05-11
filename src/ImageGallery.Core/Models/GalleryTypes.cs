@@ -4,7 +4,25 @@ public enum GalleryDisplayStyle
 {
     Default,
     Compact,
-    Crystal
+    Crystal,
+    Rounded,
+    Shadow,
+    Border,
+    Polaroid,
+    Glass,
+    Neon,
+    Minimal
+}
+
+[Flags]
+public enum ThumbnailInfoFields
+{
+    None = 0,
+    FileName = 1,
+    FileSize = 2,
+    ImageType = 4,
+    Dimensions = 8,
+    All = FileName | FileSize | ImageType | Dimensions
 }
 
 public readonly record struct GalleryLayoutOptions(

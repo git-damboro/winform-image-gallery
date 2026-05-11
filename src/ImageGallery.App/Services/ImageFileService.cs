@@ -8,22 +8,28 @@ public sealed class ImageFileService
 {
     public Task<IReadOnlyList<ImageItem>> CreateItemsAsync(IEnumerable<string> filePaths)
     {
-        var paths = filePaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        return Task.Run<IReadOnlyList<ImageItem>>(() => paths.Select(CreateItem).ToArray());
+        return CreateItemsAsync(filePaths, progress: null, CancellationToken.None);
     }
 
-    public IReadOnlyList<ImageItem> CreatePlaceholderItems(int count)
+    public Task<IReadOnlyList<ImageItem>> CreateItemsAsync(
+        IEnumerable<string> filePaths,
+        IProgress<ImageImportProgress>? progress,
+        CancellationToken cancellationToken = default)
     {
-        return Enumerable.Range(1, count)
-            .Select(index => new ImageItem(
-                filePath: $"virtual://performance/{index:D5}.jpg",
-                fileName: $"performance-{index:D5}.jpg",
-                fileSizeBytes: 0,
-                extension: ".jpg",
-                width: 1920,
-                height: 1080,
-                errorMessage: "\u6027\u80fd\u9a8c\u8bc1\u5360\u4f4d\u56fe"))
-            .ToArray();
+        var paths = filePaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return Task.Run<IReadOnlyList<ImageItem>>(() =>
+        {
+            var items = new List<ImageItem>(paths.Length);
+            for (var index = 0; index < paths.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var item = CreateItem(paths[index]);
+                items.Add(item);
+                progress?.Report(new ImageImportProgress(index + 1, paths.Length, item.FileName));
+            }
+
+            return items;
+        }, cancellationToken);
     }
 
     private static ImageItem CreateItem(string filePath)
@@ -64,3 +70,5 @@ public sealed class ImageFileService
         }
     }
 }
+
+public readonly record struct ImageImportProgress(int Completed, int Total, string CurrentFileName);

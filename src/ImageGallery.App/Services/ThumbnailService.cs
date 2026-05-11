@@ -7,7 +7,7 @@ namespace ImageGallery.App.Services;
 
 public sealed class ThumbnailService : IDisposable
 {
-    private const int CacheCapacity = 600;
+    private const int CacheCapacity = 300;
     private const int MaxPendingItems = 256;
     private static readonly int MaxConcurrentDecoders = Math.Max(2, Math.Min(4, Environment.ProcessorCount / 2));
 
@@ -16,9 +16,15 @@ public sealed class ThumbnailService : IDisposable
     private readonly ConcurrentDictionary<string, byte> _failedKeys = new();
     private readonly SemaphoreSlim _decoderGate = new(MaxConcurrentDecoders, MaxConcurrentDecoders);
     private readonly object _syncRoot = new();
+    private volatile bool _disposed;
 
     public Image? GetOrQueue(ImageItem item, int thumbnailSize, Action invalidate)
     {
+        if (_disposed)
+        {
+            return null;
+        }
+
         var key = CreateKey(item, thumbnailSize);
 
         lock (_syncRoot)
@@ -38,36 +44,55 @@ public sealed class ThumbnailService : IDisposable
         {
             _ = Task.Run(async () =>
                 {
-                    await _decoderGate.WaitAsync().ConfigureAwait(false);
                     try
                     {
-                        return LoadThumbnail(item, thumbnailSize);
+                        await _decoderGate.WaitAsync().ConfigureAwait(false);
+                        try
+                        {
+                            return _disposed ? null : LoadThumbnail(item, thumbnailSize);
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                _decoderGate.Release();
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                            }
+                        }
                     }
-                    finally
+                    catch (ObjectDisposedException)
                     {
-                        _decoderGate.Release();
+                        return null;
                     }
                 })
                 .ContinueWith(task =>
                 {
                     try
                     {
-                        if (task.Status == TaskStatus.RanToCompletion && task.Result != null)
+                        if (task.Status == TaskStatus.RanToCompletion && task.Result != null && !_disposed)
                         {
                             lock (_syncRoot)
                             {
                                 _cache.Set(key, task.Result);
                             }
                         }
+                        else if (task.Status == TaskStatus.RanToCompletion)
+                        {
+                            task.Result?.Dispose();
+                            _failedKeys.TryAdd(key, 0);
+                        }
                         else
                         {
+                            _ = task.Exception;
                             _failedKeys.TryAdd(key, 0);
                         }
                     }
                     finally
                     {
                         _pendingKeys.TryRemove(key, out _);
-                        invalidate();
+                        SafeInvalidate(invalidate);
                     }
                 }, TaskScheduler.Default);
         }
@@ -87,8 +112,23 @@ public sealed class ThumbnailService : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         Clear();
         _decoderGate.Dispose();
+    }
+
+    private static void SafeInvalidate(Action invalidate)
+    {
+        try
+        {
+            invalidate();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     private static string CreateKey(ImageItem item, int thumbnailSize)

@@ -89,4 +89,64 @@ cache.Set("c", "C");
 AssertEqual(false, cache.ContainsKey("b"), "least recently used evicted");
 AssertSequence(new[] { "B" }, evicted, "evicted value");
 
+var sessionDirectory = Path.Combine(Path.GetTempPath(), "ImageGallery.Core.Tests", Guid.NewGuid().ToString("N"));
+var sessionFile = Path.Combine(sessionDirectory, "session.json");
+var sessionStore = new GallerySessionStore();
+sessionStore.Save(sessionFile, new[] { @"C:\Images\a.jpg", "", @"C:\Images\a.jpg", @"C:\Images\b.png" });
+AssertSequence(new[] { @"C:\Images\a.jpg", @"C:\Images\b.png" }, sessionStore.Load(sessionFile), "session paths round trip");
+
+File.WriteAllText(sessionFile, "{not-json");
+AssertSequence(Array.Empty<string>(), sessionStore.Load(sessionFile), "bad session file ignored");
+
+var styleValues = ThumbnailStyleCatalog.All.Select(style => style.Value).ToArray();
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Default), "default style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Rounded), "rounded style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Shadow), "shadow style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Border), "border style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Polaroid), "polaroid style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Glass), "glass style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Crystal), "crystal style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Neon), "neon style exists");
+AssertEqual(true, styleValues.Contains(GalleryDisplayStyle.Minimal), "minimal style exists");
+AssertEqual(9, styleValues.Distinct().Count(), "style count");
+
+sessionStore.Save(sessionFile, new[] { @"C:\Images\a.jpg" }, GalleryDisplayStyle.Crystal);
+var savedState = sessionStore.LoadState(sessionFile);
+AssertEqual(GalleryDisplayStyle.Crystal, savedState.DisplayStyle, "saved style round trip");
+
+var imageItem = new ImageItem(@"C:\Images\sample-photo.jpg", "sample-photo.jpg", 1536, ".jpg", 640, 480);
+AssertSequence(
+    Array.Empty<string>(),
+    ThumbnailInfoFormatter.GetLines(imageItem, ThumbnailInfoFields.None),
+    "image only has no info lines");
+AssertSequence(
+    new[] { "sample-photo.jpg", "1.5 KB", "JPG", "640 x 480" },
+    ThumbnailInfoFormatter.GetLines(imageItem, ThumbnailInfoFields.All),
+    "all thumbnail info lines");
+AssertSequence(
+    new[] { "sample-photo.jpg", "JPG" },
+    ThumbnailInfoFormatter.GetLines(imageItem, ThumbnailInfoFields.FileName | ThumbnailInfoFields.ImageType),
+    "selected thumbnail info lines");
+
+AssertEqual("就绪", TaskProgressFormatter.FormatIdle(), "idle task text");
+AssertEqual("正在添加图片 3/10", TaskProgressFormatter.Format("正在添加图片", 3, 10), "active task text");
+AssertEqual("正在恢复图片列表", TaskProgressFormatter.Format("正在恢复图片列表", 0, 0), "unknown total task text");
+
+var filterItems = new[]
+{
+    new ImageItem(@"C:\Images\a.png", "a.png", 100, ".png"),
+    new ImageItem(@"C:\Images\b.jpg", "b.jpg", 100, ".jpg"),
+    new ImageItem(@"C:\Images\c.PNG", "c.PNG", 100, ".PNG")
+};
+
+var filtered = ImageFilterPolicy.FilterByExtensions(filterItems, new[] { ".png" });
+AssertEqual(2, filtered.Count, "png filter count");
+
+var multiFiltered = ImageFilterPolicy.FilterByExtensions(filterItems, new[] { ".png", ".jpg" });
+AssertEqual(3, multiFiltered.Count, "multi extension filter count");
+
+var filterSelection = new SelectionManager();
+filterSelection.SelectAll(filtered.Count);
+AssertSequence(new[] { 1, 0 }, filterSelection.GetSelectedIndexesDescending(), "select all filtered items");
+
 Console.WriteLine("All core tests passed.");
