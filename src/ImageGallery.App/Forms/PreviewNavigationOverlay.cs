@@ -16,6 +16,7 @@ internal sealed class PreviewNavigationOverlay : Control
     private int _currentIndex = -1;
     private float _opacity = 1f;
     private int _idleElapsedMs;
+    private PreviewHitArea _activeSide = PreviewHitArea.None;
 
     public PreviewNavigationOverlay()
     {
@@ -41,7 +42,7 @@ internal sealed class PreviewNavigationOverlay : Control
     {
         _items = items;
         _currentIndex = currentIndex;
-        Reveal();
+        Reveal(_activeSide);
     }
 
     protected override void Dispose(bool disposing)
@@ -55,23 +56,29 @@ internal sealed class PreviewNavigationOverlay : Control
         base.Dispose(disposing);
     }
 
-    protected override void OnMouseEnter(EventArgs e)
-    {
-        base.OnMouseEnter(e);
-        Reveal();
-    }
-
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        Reveal();
+
+        var side = GetHitArea(e.Location);
+        if (side is PreviewHitArea.Left or PreviewHitArea.Right)
+        {
+            Reveal(side);
+            return;
+        }
+
+        if (_activeSide != PreviewHitArea.None)
+        {
+            _activeSide = PreviewHitArea.None;
+            StartFade();
+        }
     }
 
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        _idleElapsedMs = FadeDelayMs;
-        _fadeTimer.Start();
+        _activeSide = PreviewHitArea.None;
+        StartFade();
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -103,16 +110,24 @@ internal sealed class PreviewNavigationOverlay : Control
             return;
         }
 
-        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
         DrawChrome(e.Graphics);
     }
 
-    private void Reveal()
+    private void Reveal(PreviewHitArea side)
     {
+        _activeSide = side;
         _opacity = 1f;
         _idleElapsedMs = 0;
+        _fadeTimer.Start();
+        Invalidate();
+    }
+
+    private void StartFade()
+    {
+        _idleElapsedMs = FadeDelayMs;
         _fadeTimer.Start();
         Invalidate();
     }
@@ -133,7 +148,7 @@ internal sealed class PreviewNavigationOverlay : Control
             return;
         }
 
-        if (IsPointerOnPersistentArea())
+        if (IsPointerOnActiveSide())
         {
             _opacity = 1f;
             _idleElapsedMs = 0;
@@ -157,15 +172,14 @@ internal sealed class PreviewNavigationOverlay : Control
         Invalidate();
     }
 
-    private bool IsPointerOnPersistentArea()
+    private bool IsPointerOnActiveSide()
     {
         if (IsDisposed || Disposing || !IsHandleCreated)
         {
             return false;
         }
 
-        var client = PointToClient(Cursor.Position);
-        return GetHitArea(client) is PreviewHitArea.Left or PreviewHitArea.Right;
+        return GetHitArea(PointToClient(Cursor.Position)) == _activeSide && _activeSide != PreviewHitArea.None;
     }
 
     private PreviewHitArea GetHitArea(Point point)
@@ -185,12 +199,12 @@ internal sealed class PreviewNavigationOverlay : Control
 
     private Rectangle GetLeftZone()
     {
-        return new Rectangle(0, 0, Math.Max(96, Width / 5), Height);
+        return new Rectangle(0, 0, Math.Max(64, Width / 6), Height);
     }
 
     private Rectangle GetRightZone()
     {
-        var width = Math.Max(96, Width / 5);
+        var width = Math.Max(64, Width / 6);
         return new Rectangle(Math.Max(0, Width - width), 0, width, Height);
     }
 
@@ -203,10 +217,10 @@ internal sealed class PreviewNavigationOverlay : Control
         }
 
         DrawTitleBar(graphics, alpha);
-        if (_items.Count > 1)
+
+        if (_items.Count > 1 && _activeSide != PreviewHitArea.None)
         {
-            DrawSideButton(graphics, alpha, true);
-            DrawSideButton(graphics, alpha, false);
+            DrawCircularButton(graphics, alpha, _activeSide);
         }
     }
 
@@ -239,51 +253,36 @@ internal sealed class PreviewNavigationOverlay : Control
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
     }
 
-    private void DrawSideButton(Graphics graphics, int alpha, bool left)
+    private void DrawCircularButton(Graphics graphics, int alpha, PreviewHitArea side)
     {
-        var zone = left ? GetLeftZone() : GetRightZone();
-        var buttonWidth = Math.Max(92, zone.Width - 28);
-        var buttonHeight = Math.Max(122, Math.Min(170, Height - 160));
-        var buttonY = (Height - buttonHeight) / 2;
-        var buttonX = left ? 14 : Width - buttonWidth - 14;
-        var buttonRect = new Rectangle(buttonX, buttonY, buttonWidth, buttonHeight);
-        var hovered = zone.Contains(PointToClient(Cursor.Position));
-        var fillAlpha = hovered ? Clamp(alpha * 170 / 255) : Clamp(alpha * 120 / 255);
-        var borderAlpha = hovered ? Clamp(alpha * 180 / 255) : Clamp(alpha * 110 / 255);
+        var hovered = GetHitArea(PointToClient(Cursor.Position)) == side;
+        var diameter = hovered ? 38 : 34;
+        var y = (Height - diameter) / 2;
+        var x = side == PreviewHitArea.Left ? 10 : Width - diameter - 10;
+        var rect = new Rectangle(x, y, diameter, diameter);
 
         using var fillBrush = new LinearGradientBrush(
-            buttonRect,
-            Color.FromArgb(fillAlpha, 20, 26, 36),
-            Color.FromArgb(Clamp(fillAlpha - 18), 14, 18, 26),
+            rect,
+            Color.FromArgb(Clamp(hovered ? alpha : alpha * 190 / 255), 27, 34, 46),
+            Color.FromArgb(Clamp(alpha * 130 / 255), 12, 18, 26),
             LinearGradientMode.Vertical);
-        graphics.FillRoundedRectangle(fillBrush, buttonRect, 18);
+        graphics.FillEllipse(fillBrush, rect);
 
-        using var borderPen = new Pen(Color.FromArgb(borderAlpha, 255, 255, 255), 1.2f);
-        graphics.DrawRoundedRectangle(borderPen, buttonRect, 18);
+        using var borderPen = new Pen(Color.FromArgb(Clamp(hovered ? alpha : alpha * 170 / 255), 255, 255, 255), hovered ? 1.6f : 1.2f);
+        graphics.DrawEllipse(borderPen, rect);
 
-        var arrow = left ? "\u25c0" : "\u25b6";
-        var label = left ? "\u4e0a\u4e00\u5f20" : "\u4e0b\u4e00\u5f20";
-        using var arrowFont = new Font(Font.FontFamily, 22f, FontStyle.Bold);
-        using var labelFont = new Font(Font.FontFamily, 10.5f, FontStyle.Bold);
+        var arrow = side == PreviewHitArea.Left ? "\u2190" : "\u2192";
+        var arrowFontSize = hovered ? 16f : 14f;
+        using var arrowFont = new Font(Font.FontFamily, arrowFontSize, FontStyle.Bold);
 
-        var arrowRect = new Rectangle(buttonRect.X, buttonRect.Y + 28, buttonRect.Width, 34);
-        var labelRect = new Rectangle(buttonRect.X + 6, buttonRect.Bottom - 46, buttonRect.Width - 12, 20);
-
+        var arrowRect = Rectangle.Inflate(rect, -3, -3);
         TextRenderer.DrawText(
             graphics,
             arrow,
             arrowFont,
             arrowRect,
             Color.FromArgb(alpha, 248, 250, 252),
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-
-        TextRenderer.DrawText(
-            graphics,
-            label,
-            labelFont,
-            labelRect,
-            Color.FromArgb(alpha, 220, 228, 236),
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
     private static int Clamp(int value)

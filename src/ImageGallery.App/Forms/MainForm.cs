@@ -26,6 +26,7 @@ public sealed class MainForm : Form
     private readonly ContextMenuStrip _infoDropDown = new();
     private readonly CheckedListBox _infoCheckedList = new();
     private readonly ToolStripStatusLabel _taskStatusLabel = new();
+    private readonly ToolStripStatusLabel _taskDetailLabel = new();
     private readonly ToolStripProgressBar _taskProgressBar = new();
     private readonly string _sessionFilePath = GetSessionFilePath();
     private bool _updatingInfoChoices;
@@ -185,6 +186,11 @@ public sealed class MainForm : Form
         _taskStatusLabel.Spring = true;
         _taskStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
 
+        _taskDetailLabel.AutoSize = false;
+        _taskDetailLabel.Width = 260;
+        _taskDetailLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _taskDetailLabel.Margin = new Padding(8, 3, 0, 3);
+
         _taskProgressBar.Minimum = 0;
         _taskProgressBar.Maximum = 1;
         _taskProgressBar.Value = 0;
@@ -192,6 +198,7 @@ public sealed class MainForm : Form
         _taskProgressBar.Width = 180;
 
         statusBar.Items.Add(_taskStatusLabel);
+        statusBar.Items.Add(_taskDetailLabel);
         statusBar.Items.Add(_taskProgressBar);
         return statusBar;
     }
@@ -480,6 +487,7 @@ public sealed class MainForm : Form
         _taskProgressBar.Maximum = Math.Max(1, total);
         _taskProgressBar.Value = 0;
         _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, 0, total);
+        _taskDetailLabel.Text = string.Empty;
     }
 
     private void UpdateTask(string taskName, int completed, int total, string currentFileName)
@@ -491,10 +499,8 @@ public sealed class MainForm : Form
         }
 
         _taskProgressBar.Value = Math.Clamp(completed, _taskProgressBar.Minimum, _taskProgressBar.Maximum);
-        var progressText = TaskProgressFormatter.Format(taskName, completed, total);
-        _taskStatusLabel.Text = string.IsNullOrWhiteSpace(currentFileName)
-            ? progressText
-            : $"{progressText} - {currentFileName}";
+        _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, completed, total);
+        _taskDetailLabel.Text = TrimTaskDetail(currentFileName);
     }
 
     private void EndTask()
@@ -502,8 +508,22 @@ public sealed class MainForm : Form
         _taskProgressBar.Value = 0;
         _taskProgressBar.Visible = false;
         _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
+        _taskDetailLabel.Text = string.Empty;
         _addButton.Enabled = true;
         _deleteButton.Enabled = true;
+    }
+
+    private static string TrimTaskDetail(string currentFileName)
+    {
+        if (string.IsNullOrWhiteSpace(currentFileName))
+        {
+            return string.Empty;
+        }
+
+        const int maxLength = 42;
+        return currentFileName.Length <= maxLength
+            ? currentFileName
+            : $"{currentFileName[..Math.Max(1, maxLength - 1)]}\u2026";
     }
 
     private void DeleteButtonOnClick(object? sender, EventArgs e)
