@@ -7,6 +7,13 @@ public readonly record struct ThumbnailCardVisualProfile(
     int ShadowAlpha,
     int ShadowBlurPx);
 
+public readonly record struct ThumbnailSelectionVisualProfile(
+    int OverlayArgb,
+    int BorderArgb,
+    int GlowArgb,
+    int BorderThickness,
+    int BorderRadius);
+
 public sealed record ThumbnailStyleDefinition(
     GalleryDisplayStyle Value,
     string Label,
@@ -16,4 +23,5 @@ public sealed record ThumbnailStyleDefinition(
     int TextTopSpacing,
     int TextLineHeight,
     int CornerRadius,
-    ThumbnailCardVisualProfile CardVisualProfile);
+    ThumbnailCardVisualProfile CardVisualProfile,
+    ThumbnailSelectionVisualProfile SelectionVisualProfile);

@@ -120,6 +120,7 @@ AssertEqual(compactStyle.CardVisualProfile, minimalStyle.CardVisualProfile, "com
 var glassProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Glass).CardVisualProfile;
 var crystalProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Crystal).CardVisualProfile;
 var shadowProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Shadow).CardVisualProfile;
+var selectionProfile = ThumbnailStyleCatalog.Get(GalleryDisplayStyle.Crystal).SelectionVisualProfile;
 
 AssertEqual(
     true,
@@ -137,6 +138,10 @@ AssertEqual(
     true,
     shadowProfile.ShadowBlurPx > crystalProfile.ShadowBlurPx,
     "shadow blur stronger than crystal");
+AssertEqual(0, selectionProfile.BorderRadius, "selected card uses square border");
+AssertEqual(2, selectionProfile.BorderThickness, "selected card border is thicker");
+AssertEqual(unchecked((int)0x4A184A96), selectionProfile.OverlayArgb, "selected card overlay is deeper blue");
+AssertEqual(unchecked((int)0xFF2A71DC), selectionProfile.BorderArgb, "selected card border is bright blue");
 
 sessionStore.Save(sessionFile, new[] { @"C:\Images\a.jpg" }, GalleryDisplayStyle.Crystal);
 var savedState = sessionStore.LoadState(sessionFile);

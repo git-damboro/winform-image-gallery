@@ -23,7 +23,15 @@ public sealed class GalleryRenderer
         var styleDefinition = ThumbnailStyleCatalog.Get(style);
         var visuals = GetVisualSpec(style, styleDefinition.CardVisualProfile);
 
-        DrawBackground(graphics, bounds, selected, hovered, style, styleDefinition.CardVisualProfile, visuals);
+        DrawBackground(
+            graphics,
+            bounds,
+            selected,
+            hovered,
+            style,
+            styleDefinition.CardVisualProfile,
+            styleDefinition.SelectionVisualProfile,
+            visuals);
 
         var padding = styleDefinition.Padding;
         var imageBounds = new Rectangle(
@@ -53,6 +61,7 @@ public sealed class GalleryRenderer
         bool hovered,
         GalleryDisplayStyle style,
         ThumbnailCardVisualProfile profile,
+        ThumbnailSelectionVisualProfile selectionProfile,
         ThumbnailVisualSpec visuals)
     {
         var card = Rectangle.Inflate(bounds, -1, -1);
@@ -103,6 +112,11 @@ public sealed class GalleryRenderer
             LinearGradientMode.Horizontal);
         using var borderPen = new Pen(borderBrush, visuals.BorderThickness + (selected ? 1 : hovered ? 1 : 0));
         graphics.DrawRoundedRectangle(borderPen, card, radius);
+
+        if (selected)
+        {
+            DrawSelectionLayer(graphics, card, selectionProfile, hovered);
+        }
 
         if (visuals.UseGlow && profile.BorderGlowAlpha > 0)
         {
@@ -455,6 +469,25 @@ public sealed class GalleryRenderer
 
         using var innerPen = new Pen(Color.FromArgb(ClampByte(alpha / 2), glowColor), 4f);
         graphics.DrawRoundedRectangle(innerPen, Rectangle.Inflate(card, 2, 2), Math.Max(2, radius - 1));
+    }
+
+    private static void DrawSelectionLayer(
+        Graphics graphics,
+        Rectangle card,
+        ThumbnailSelectionVisualProfile selectionProfile,
+        bool hovered)
+    {
+        var overlayAlpha = ClampByte(Color.FromArgb(selectionProfile.OverlayArgb).A + (hovered ? 8 : 0));
+        var overlayColor = Color.FromArgb(overlayAlpha, Color.FromArgb(selectionProfile.OverlayArgb));
+        using var overlayBrush = new SolidBrush(overlayColor);
+        graphics.FillRoundedRectangle(overlayBrush, card, Math.Max(2, selectionProfile.BorderRadius));
+
+        var borderRect = Rectangle.Inflate(card, 2, 2);
+        using var glowPen = new Pen(Color.FromArgb(Color.FromArgb(selectionProfile.GlowArgb).A, Color.FromArgb(selectionProfile.GlowArgb)), selectionProfile.BorderThickness + 2);
+        graphics.DrawRectangle(glowPen, borderRect);
+
+        using var borderPen = new Pen(Color.FromArgb(selectionProfile.BorderArgb), selectionProfile.BorderThickness);
+        graphics.DrawRectangle(borderPen, borderRect);
     }
 
     private static int ClampByte(int value)
