@@ -57,7 +57,7 @@ public sealed class ImageFileService
 
             try
             {
-                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false);
                 return new ImageItem(filePath, fileName, fileInfo.Length, extension, image.Width, image.Height);
             }

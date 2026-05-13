@@ -6,7 +6,7 @@ public static class ThumbnailInfoFormatter
 {
     public static IReadOnlyList<string> GetLines(ImageItem item, ThumbnailInfoFields fields)
     {
-        var lines = new List<string>(4);
+        var lines = new List<string>(7);
 
         if (fields.HasFlag(ThumbnailInfoFields.FileName))
         {
@@ -26,6 +26,21 @@ public static class ThumbnailInfoFormatter
         if (fields.HasFlag(ThumbnailInfoFields.Dimensions))
         {
             lines.Add(item.DimensionsText);
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.Diameter) && item.ContentInfo.MaxObjectDiameter.HasValue)
+        {
+            lines.Add($"直径 {item.ContentInfo.MaxObjectDiameter.Value:F2}");
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.Area) && item.ContentInfo.MaxObjectArea.HasValue)
+        {
+            lines.Add($"面积 {item.ContentInfo.MaxObjectArea.Value:F2}");
+        }
+
+        if (fields.HasFlag(ThumbnailInfoFields.SizeSpec) && item.ContentInfo.SizeSpec is not null)
+        {
+            lines.Add($"规格 {item.ContentInfo.SizeSpec}");
         }
 
         return lines;
