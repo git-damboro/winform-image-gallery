@@ -9,6 +9,12 @@ namespace ImageGallery.App.Controls;
 
 public sealed class ImageGalleryControl : UserControl
 {
+    private const float BasePixelSize = 128f;
+    private const float MinScale = 0.1f;
+    private const float MaxScale = 50f;
+    private const int MinPixelSize = 16;
+    private const int MaxPixelSize = 4096;
+
     private readonly GalleryCanvas _canvas;
     private readonly VScrollBar _verticalScrollBar = new();
     private readonly HScrollBar _horizontalScrollBar = new();
@@ -23,10 +29,9 @@ public sealed class ImageGalleryControl : UserControl
     private int _hoverIndex = -1;
     private int _scrollX;
     private int _scrollY;
-    private int _thumbnailSize = 128;
+    private float _thumbnailScale = 1.0f;
     private GalleryDisplayStyle _displayStyle = GalleryDisplayStyle.Crystal;
     private ThumbnailInfoFields _thumbnailInfoFields = ThumbnailInfoFields.All;
-    private HashSet<string> _visibleExtensions = new(StringComparer.OrdinalIgnoreCase);
 
     private static GalleryLayoutOptions DefaultLayoutOptions => new(128, 56, 10, 14);
 
@@ -52,27 +57,34 @@ public sealed class ImageGalleryControl : UserControl
         SetStyle(ControlStyles.ResizeRedraw, true);
     }
 
-    public event EventHandler<ImageItem>? PreviewRequested;
+    public event EventHandler<ImageDeletedEventArgs>? ImageDeleted;
 
-    public event EventHandler<ImageItem>? ImageOpenRequested;
+    public event EventHandler<ImageSelectedEventArgs>? ImageSelected;
 
-    public event EventHandler? PreviewCloseRequested;
-
-    public int ThumbnailSize
+    public float ThumbnailScale
     {
-        get => _thumbnailSize;
+        get => _thumbnailScale;
         set
         {
-            var normalized = Math.Clamp(value, 64, 256);
-            if (_thumbnailSize == normalized)
+            var normalized = Math.Clamp(value, MinScale, MaxScale);
+            if (Math.Abs(_thumbnailScale - normalized) < 1e-6f)
             {
                 return;
             }
 
-            _thumbnailSize = normalized;
+            _thumbnailScale = normalized;
             _thumbnailService.Clear();
             RecalculateLayout();
         }
+    }
+
+    public int ThumbnailPixelSize => Math.Clamp((int)Math.Round(BasePixelSize * _thumbnailScale), MinPixelSize, MaxPixelSize);
+
+    [Obsolete("Use ThumbnailScale instead.")]
+    public int ThumbnailSize
+    {
+        get => ThumbnailPixelSize;
+        set => ThumbnailScale = value / BasePixelSize;
     }
 
     public GalleryDisplayStyle DisplayStyle
@@ -105,20 +117,84 @@ public sealed class ImageGalleryControl : UserControl
         }
     }
 
-    public IReadOnlyCollection<string> VisibleExtensions
+    public IReadOnlyList<ImageItem> Items => _items;
+
+    public void LoadImages(IEnumerable<GalleryImageInput> inputs, LoadMode mode)
     {
-        get => _visibleExtensions;
-        set
+        if (mode == LoadMode.Replace)
         {
-            var normalized = new HashSet<string>(ImageFilterPolicy.NormalizeExtensions(value), StringComparer.OrdinalIgnoreCase);
-            if (_visibleExtensions.SetEquals(normalized))
+            _thumbnailService.CancelPrefetch();
+            _items.Clear();
+            _selectionManager.Clear();
+            _hoverIndex = -1;
+        }
+
+        var existingPaths = mode == LoadMode.Append
+            ? new HashSet<string>(_items.Select(i => i.FilePath), StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        foreach (var input in inputs)
+        {
+            if (existingPaths != null && existingPaths.Contains(input.FilePath))
             {
-                return;
+                continue;
             }
 
-            _visibleExtensions = normalized;
-            RebuildVisibleItems(clearSelection: true);
+            var item = CreateItemFromInput(input);
+            _items.Add(item);
+            existingPaths?.Add(input.FilePath);
         }
+
+        RebuildVisibleItems(clearSelection: mode == LoadMode.Replace);
+        SchedulePrefetchForBacklog();
+    }
+
+    public void RemoveImage(string filePath)
+    {
+        var index = _items.FindIndex(i => string.Equals(i.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            return;
+        }
+
+        _items.RemoveAt(index);
+        _selectionManager.Clear();
+        _hoverIndex = -1;
+        RebuildVisibleItems(clearSelection: true);
+    }
+
+    public void RemoveImages(IEnumerable<string> filePaths)
+    {
+        var toRemove = new HashSet<string>(filePaths, StringComparer.OrdinalIgnoreCase);
+        if (toRemove.Count == 0)
+        {
+            return;
+        }
+
+        _items.RemoveAll(i => toRemove.Contains(i.FilePath));
+        _selectionManager.Clear();
+        _hoverIndex = -1;
+        RebuildVisibleItems(clearSelection: true);
+    }
+
+    public void ClearImages()
+    {
+        if (_items.Count == 0)
+        {
+            return;
+        }
+
+        _thumbnailService.CancelPrefetch();
+        _items.Clear();
+        _selectionManager.Clear();
+        _hoverIndex = -1;
+        RebuildVisibleItems(clearSelection: true);
+    }
+
+    public void SelectAll()
+    {
+        _selectionManager.SelectAll(_visibleItemIndexes.Count);
+        InvalidateCanvas();
     }
 
     protected override void Dispose(bool disposing)
@@ -138,39 +214,55 @@ public sealed class ImageGalleryControl : UserControl
         RecalculateLayout();
     }
 
-    public void SetItems(IEnumerable<ImageItem> items)
+    private static ImageItem CreateItemFromInput(GalleryImageInput input)
     {
-        _items.Clear();
-        _items.AddRange(items);
-        _hoverIndex = -1;
-        RebuildVisibleItems(clearSelection: true);
-    }
+        var fileName = Path.GetFileName(input.FilePath);
+        var extension = Path.GetExtension(input.FilePath);
 
-    public IReadOnlyList<int> GetSelectedIndexesDescending()
-    {
-        return _selectionManager
-            .GetSelectedIndexesDescending()
-            .Select(visibleIndex => _visibleItemIndexes[visibleIndex])
-            .ToArray();
-    }
+        try
+        {
+            var fileInfo = new FileInfo(input.FilePath);
+            if (!fileInfo.Exists)
+            {
+                return new ImageItem(input.FilePath, fileName, 0, extension,
+                    errorMessage: "文件不存在", contentInfo: input.ContentInfo);
+            }
 
-    public void RemoveSelectedIndexes(IEnumerable<int> indexes)
-    {
-        _selectionManager.Clear();
-        InvalidateCanvas();
-    }
+            if (!FileFormatPolicy.IsRecognized(extension))
+            {
+                return new ImageItem(input.FilePath, fileName, fileInfo.Length, extension,
+                    errorMessage: FileFormatPolicy.GetSupportMessage(extension), contentInfo: input.ContentInfo);
+            }
 
-    public void SelectAllVisible()
-    {
-        _selectionManager.SelectAll(_visibleItemIndexes.Count);
-        InvalidateCanvas();
+            try
+            {
+                using var stream = new FileStream(input.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var image = System.Drawing.Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false);
+                return new ImageItem(input.FilePath, fileName, fileInfo.Length, extension,
+                    image.Width, image.Height, contentInfo: input.ContentInfo);
+            }
+            catch (Exception ex) when (ex is ArgumentException or OutOfMemoryException or IOException or UnauthorizedAccessException)
+            {
+                var message = FileFormatPolicy.IsNativelyDecodable(extension)
+                    ? ex.Message
+                    : $"{FileFormatPolicy.GetSupportMessage(extension)}: {ex.Message}";
+                return new ImageItem(input.FilePath, fileName, fileInfo.Length, extension,
+                    errorMessage: message, contentInfo: input.ContentInfo);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return new ImageItem(input.FilePath, fileName, 0, extension,
+                errorMessage: ex.Message, contentInfo: input.ContentInfo);
+        }
     }
 
     private GalleryLayoutOptions CreateLayoutOptions()
     {
         var style = ThumbnailStyleCatalog.Get(DisplayStyle);
+        var pixelSize = ThumbnailPixelSize;
         return new GalleryLayoutOptions(
-            _thumbnailSize,
+            pixelSize,
             CalculateTextAreaHeight(style),
             style.Padding,
             style.Gap);
@@ -190,26 +282,13 @@ public sealed class ImageGalleryControl : UserControl
     private static int CountSelectedInfoFields(ThumbnailInfoFields fields)
     {
         var count = 0;
-        if (fields.HasFlag(ThumbnailInfoFields.FileName))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.FileSize))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.ImageType))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.Dimensions))
-        {
-            count++;
-        }
-
+        if (fields.HasFlag(ThumbnailInfoFields.FileName)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.FileSize)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.ImageType)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Dimensions)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Diameter)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Area)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.SizeSpec)) count++;
         return count;
     }
 
@@ -218,10 +297,7 @@ public sealed class ImageGalleryControl : UserControl
         _visibleItemIndexes.Clear();
         for (var index = 0; index < _items.Count; index++)
         {
-            if (IsVisibleItem(_items[index]))
-            {
-                _visibleItemIndexes.Add(index);
-            }
+            _visibleItemIndexes.Add(index);
         }
 
         if (clearSelection)
@@ -231,11 +307,6 @@ public sealed class ImageGalleryControl : UserControl
         }
 
         RecalculateLayout();
-    }
-
-    private bool IsVisibleItem(ImageItem item)
-    {
-        return _visibleExtensions.Count == 0 || _visibleExtensions.Contains(ImageFilterPolicy.NormalizeExtension(item.Extension));
     }
 
     private void RecalculateLayout()
@@ -350,7 +421,7 @@ public sealed class ImageGalleryControl : UserControl
     private void RecalculateVisibleLayout()
     {
         _layout = GalleryLayoutCalculator.Calculate(
-            _items.Count,
+            _visibleItemIndexes.Count,
             Math.Max(1, _canvas.Width),
             Math.Max(1, _canvas.Height),
             _scrollX,
@@ -381,13 +452,15 @@ public sealed class ImageGalleryControl : UserControl
         {
             TextRenderer.DrawText(
                 e.Graphics,
-                "\u8bf7\u70b9\u51fb\u201c\u6dfb\u52a0\u56fe\u7247\u201d\u5bfc\u5165\u56fe\u50cf",
+                "请点击“添加图片”导入图像",
                 Font,
                 _canvas.ClientRectangle,
                 Color.FromArgb(120, 126, 138),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             return;
         }
+
+        var pixelSize = ThumbnailPixelSize;
 
         for (var index = _layout.VisibleRange.FirstIndex; index <= _layout.VisibleRange.LastIndex; index++)
         {
@@ -404,7 +477,7 @@ public sealed class ImageGalleryControl : UserControl
             }
 
             var item = _items[_visibleItemIndexes[index]];
-            var thumbnail = _thumbnailService.GetOrQueue(item, _thumbnailSize, InvalidateCanvas);
+            var thumbnail = _thumbnailService.GetOrQueue(item, pixelSize, InvalidateCanvas);
             _renderer.DrawCard(
                 e.Graphics,
                 Font,
@@ -415,7 +488,7 @@ public sealed class ImageGalleryControl : UserControl
                 index == _hoverIndex,
                 DisplayStyle,
                 _thumbnailInfoFields,
-                _thumbnailSize);
+                pixelSize);
         }
     }
 
@@ -455,10 +528,6 @@ public sealed class ImageGalleryControl : UserControl
         {
             _hoverTimer.Start();
         }
-        else
-        {
-            PreviewCloseRequested?.Invoke(this, EventArgs.Empty);
-        }
 
         InvalidateCanvas();
     }
@@ -467,16 +536,16 @@ public sealed class ImageGalleryControl : UserControl
     {
         _hoverTimer.Stop();
         _hoverIndex = -1;
-        PreviewCloseRequested?.Invoke(this, EventArgs.Empty);
         InvalidateCanvas();
     }
 
     private void CanvasOnDoubleClick(MouseEventArgs e)
     {
         var index = HitTest(e.Location);
-        if (index >= 0)
+        if (index >= 0 && index < _visibleItemIndexes.Count)
         {
-            ImageOpenRequested?.Invoke(this, _items[_visibleItemIndexes[index]]);
+            var item = _items[_visibleItemIndexes[index]];
+            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath));
         }
     }
 
@@ -486,13 +555,91 @@ public sealed class ImageGalleryControl : UserControl
 
         if (_hoverIndex >= 0 && _hoverIndex < _visibleItemIndexes.Count)
         {
-            PreviewRequested?.Invoke(this, _items[_visibleItemIndexes[_hoverIndex]]);
+            var item = _items[_visibleItemIndexes[_hoverIndex]];
+            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath));
         }
+    }
+
+    private void HandleDeleteSelected()
+    {
+        var selectedVisibleIndexes = _selectionManager.GetSelectedIndexesDescending();
+        if (selectedVisibleIndexes.Count == 0)
+        {
+            return;
+        }
+
+        var filePaths = selectedVisibleIndexes
+            .Where(vi => vi >= 0 && vi < _visibleItemIndexes.Count)
+            .Select(vi => _items[_visibleItemIndexes[vi]].FilePath)
+            .ToList();
+
+        var action = filePaths.Count == 1
+            ? ImageDeleteAction.Single
+            : ImageDeleteAction.Multiple;
+
+        foreach (var vi in selectedVisibleIndexes.OrderByDescending(x => x))
+        {
+            if (vi >= 0 && vi < _visibleItemIndexes.Count)
+            {
+                var itemIndex = _visibleItemIndexes[vi];
+                _items.RemoveAt(itemIndex);
+            }
+        }
+
+        _selectionManager.Clear();
+        _hoverIndex = -1;
+        RebuildVisibleItems(clearSelection: true);
+
+        ImageDeleted?.Invoke(this, new ImageDeletedEventArgs(action, filePaths));
+    }
+
+    private void HandleClearAll()
+    {
+        if (_items.Count == 0)
+        {
+            return;
+        }
+
+        _thumbnailService.CancelPrefetch();
+        _items.Clear();
+        _selectionManager.Clear();
+        _hoverIndex = -1;
+        RebuildVisibleItems(clearSelection: true);
+
+        ImageDeleted?.Invoke(this, new ImageDeletedEventArgs(ImageDeleteAction.ClearAll, Array.Empty<string>()));
     }
 
     private int HitTest(Point point)
     {
         return _layout.IndexFromPoint(point.X + _scrollX, point.Y + _scrollY);
+    }
+
+    private void SchedulePrefetchForBacklog()
+    {
+        if (_visibleItemIndexes.Count == 0)
+        {
+            return;
+        }
+
+        var pixelSize = ThumbnailPixelSize;
+        var visibleFirst = _layout.VisibleRange.FirstIndex;
+        var visibleLast = _layout.VisibleRange.LastIndex;
+
+        var backlog = new List<(ImageItem Item, int ThumbnailSize)>();
+        for (var index = 0; index < _visibleItemIndexes.Count; index++)
+        {
+            if (index >= visibleFirst && index <= visibleLast)
+            {
+                continue;
+            }
+
+            backlog.Add((_items[_visibleItemIndexes[index]], pixelSize));
+        }
+
+        if (backlog.Count > 0)
+        {
+            _thumbnailService.SchedulePrefetch(backlog);
+        }
     }
 
     private sealed class GalleryCanvas : Control
@@ -553,7 +700,13 @@ public sealed class ImageGalleryControl : UserControl
         {
             if (keyData == (Keys.Control | Keys.A))
             {
-                _owner.SelectAllVisible();
+                _owner.SelectAll();
+                return true;
+            }
+
+            if (keyData == Keys.Delete)
+            {
+                _owner.HandleDeleteSelected();
                 return true;
             }
 
