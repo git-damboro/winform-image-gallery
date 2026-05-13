@@ -22,8 +22,13 @@ public enum ThumbnailInfoFields
     FileSize = 2,
     ImageType = 4,
     Dimensions = 8,
-    All = FileName | FileSize | ImageType | Dimensions
+    Diameter = 16,
+    Area = 32,
+    SizeSpec = 64,
+    All = FileName | FileSize | ImageType | Dimensions | Diameter | Area | SizeSpec
 }
+
+public enum LoadMode { Replace, Append }
 
 public readonly record struct GalleryLayoutOptions(
     int ThumbnailSize,

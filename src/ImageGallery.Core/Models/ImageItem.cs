@@ -9,7 +9,8 @@ public sealed class ImageItem
         string extension,
         int? width = null,
         int? height = null,
-        string? errorMessage = null)
+        string? errorMessage = null,
+        ImageContentInfo? contentInfo = null)
     {
         Id = Guid.NewGuid();
         FilePath = filePath;
@@ -19,6 +20,7 @@ public sealed class ImageItem
         Width = width;
         Height = height;
         ErrorMessage = errorMessage;
+        ContentInfo = contentInfo ?? ImageContentInfo.Empty;
     }
 
     public Guid Id { get; }
@@ -36,6 +38,8 @@ public sealed class ImageItem
     public int? Height { get; }
 
     public string? ErrorMessage { get; }
+
+    public ImageContentInfo ContentInfo { get; }
 
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
