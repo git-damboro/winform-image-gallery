@@ -7,6 +7,8 @@ namespace ImageGallery.App.Forms;
 
 public sealed class PreviewForm : Form
 {
+    private const long SuperLargePixelThreshold = 100_000_000;
+
     private readonly PictureBox _pictureBox = new();
     private readonly Label _errorLabel = new();
     private readonly PreviewNavigationOverlay _overlay = new();
@@ -148,7 +150,7 @@ public sealed class PreviewForm : Form
 
         try
         {
-            using var stream = new FileStream(item.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var stream = new FileStream(item.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var source = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false);
             _currentImage = CreatePreviewBitmap(source, ClientSize.Width, ClientSize.Height);
             _pictureBox.Image = _currentImage;
@@ -203,14 +205,51 @@ public sealed class PreviewForm : Form
 
         var targetWidth = Math.Max(1, (int)Math.Round(source.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Round(source.Height * scale));
-        var bitmap = new Bitmap(targetWidth, targetHeight);
 
-        using var graphics = Graphics.FromImage(bitmap);
+        try
+        {
+            if ((long)source.Width * source.Height > SuperLargePixelThreshold)
+            {
+                var thumb = source.GetThumbnailImage(targetWidth, targetHeight, null, IntPtr.Zero);
+                if (thumb is Bitmap bitmap)
+                {
+                    return bitmap;
+                }
+
+                using (thumb)
+                {
+                    var result = new Bitmap(targetWidth, targetHeight);
+                    using var g = Graphics.FromImage(result);
+                    g.Clear(Color.FromArgb(18, 22, 30));
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.DrawImage(thumb, 0, 0, targetWidth, targetHeight);
+                    return result;
+                }
+            }
+        }
+        catch (OutOfMemoryException)
+        {
+            return CreateFallbackBitmap(maxWidth, maxHeight);
+        }
+
+        var bmp = new Bitmap(targetWidth, targetHeight);
+        using var graphics = Graphics.FromImage(bmp);
         graphics.Clear(Color.FromArgb(18, 22, 30));
         graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
         graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
         graphics.DrawImage(source, 0, 0, targetWidth, targetHeight);
 
+        return bmp;
+    }
+
+    private static Bitmap CreateFallbackBitmap(int width, int height)
+    {
+        var w = Math.Max(64, Math.Min(width, 400));
+        var h = Math.Max(48, Math.Min(height, 300));
+        var bitmap = new Bitmap(w, h);
+        using var g = Graphics.FromImage(bitmap);
+        g.Clear(Color.FromArgb(18, 22, 30));
         return bitmap;
     }
 }
