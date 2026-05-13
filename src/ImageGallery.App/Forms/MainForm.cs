@@ -1,7 +1,6 @@
 using System.Drawing;
 using System.Windows.Forms;
 using ImageGallery.App.Controls;
-using ImageGallery.App.Services;
 using ImageGallery.Core.Models;
 using ImageGallery.Core.Services;
 
@@ -14,7 +13,6 @@ public sealed class MainForm : Form
     private const int TrackBarMinimum = 0;
     private const int TrackBarMaximum = 1000;
 
-    private readonly ImageFileService _imageFileService = new();
     private readonly GallerySessionStore _sessionStore = new();
     private readonly ImageGalleryControl _galleryControl = new();
     private readonly Button _addButton = new();
@@ -98,7 +96,7 @@ public sealed class MainForm : Form
             BeginTask("正在恢复图片列表", savedState.ImagePaths.Count);
             await Task.Yield();
 
-            await ImportIntoGalleryAsync(
+            await ImportThroughControlAsync(
                 "正在恢复图片列表",
                 CreateGalleryInputs(savedState.ImagePaths),
                 LoadMode.Replace,
@@ -431,86 +429,40 @@ public sealed class MainForm : Form
         return new ImageContentInfo(diameter, area, spec);
     }
 
-    private async Task ImportIntoGalleryAsync(
+    private async Task ImportThroughControlAsync(
         string taskName,
         IEnumerable<GalleryImageInput> inputs,
         LoadMode mode,
         bool saveSessionWhenCompleted)
     {
-        var inputArray = inputs as GalleryImageInput[] ?? inputs.ToArray();
-
         if (mode == LoadMode.Replace)
         {
             _allItems.Clear();
             _allItemPaths.Clear();
-            _galleryControl.LoadItems(Array.Empty<ImageItem>(), LoadMode.Replace);
-            UpdateCountLabel();
         }
 
-        var batchSize = ComputeUiBatchSize(inputArray.Length);
-        var completed = 0;
-
-        for (var offset = 0; offset < inputArray.Length; offset += batchSize)
+        var importedItems = await _galleryControl.LoadImagesAsync(
+            inputs,
+            mode,
+            (completed, total, currentFileName) => UpdateTask(taskName, completed, total, currentFileName));
+        foreach (var item in importedItems)
         {
-            var currentBatchSize = Math.Min(batchSize, inputArray.Length - offset);
-            var batch = new ArraySegment<GalleryImageInput>(inputArray, offset, currentBatchSize);
-            var importedItems = await _imageFileService.CreateItemsAsync(batch, progress: null);
-            var visibleItems = new List<ImageItem>(importedItems.Count);
-
-            foreach (var item in importedItems)
+            if (_allItemPaths.Add(item.FilePath))
             {
-                if (!_allItemPaths.Add(item.FilePath))
-                {
-                    continue;
-                }
-
                 _allItems.Add(item);
-                if (MatchesCurrentFilter(item.FilePath))
-                {
-                    visibleItems.Add(item);
-                }
             }
+        }
 
-            if (visibleItems.Count > 0)
-            {
-                _galleryControl.LoadItems(visibleItems, LoadMode.Append);
-            }
-
-            completed += currentBatchSize;
-            var currentFileName = importedItems.Count > 0
-                ? importedItems[^1].FileName
-                : Path.GetFileName(batch.Array![offset + currentBatchSize - 1].FilePath);
-            UpdateCountLabel();
-            UpdateTask(taskName, completed, inputArray.Length, currentFileName);
-            await Task.Yield();
+        UpdateCountLabel();
+        if (_currentFilterExtensions.Count > 0)
+        {
+            ApplyFilterToGallery();
         }
 
         if (saveSessionWhenCompleted)
         {
             SaveCurrentSession();
         }
-    }
-
-    private bool MatchesCurrentFilter(string filePath)
-    {
-        if (_currentFilterExtensions.Count == 0)
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(filePath);
-        return _currentFilterExtensions.Contains(ImageFilterPolicy.NormalizeExtension(extension));
-    }
-
-    private static int ComputeUiBatchSize(int total)
-    {
-        const int targetRefreshes = 48;
-        if (total <= 0)
-        {
-            return 1;
-        }
-
-        return Math.Max(1, (int)Math.Ceiling(total / (double)targetRefreshes));
     }
 
     private static int CountSelectedExtensions(IEnumerable<string> extensions)
@@ -600,7 +552,7 @@ public sealed class MainForm : Form
             BeginTask("正在添加图片", dialog.FileNames.Length);
             await Task.Yield();
 
-            await ImportIntoGalleryAsync(
+            await ImportThroughControlAsync(
                 "正在添加图片",
                 CreateGalleryInputs(dialog.FileNames),
                 LoadMode.Append,

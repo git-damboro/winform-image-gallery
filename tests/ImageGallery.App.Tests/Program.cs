@@ -74,19 +74,47 @@ if (formatScaleTextMethod is null)
 var scaleText = (string?)formatScaleTextMethod.Invoke(null, new object?[] { 1.25f });
 AssertTrue(scaleText == "1.25x", "formats scale text with multiplier suffix");
 
-var computeUiBatchSizeMethod = typeof(MainForm).GetMethod(
+var asyncLoadMethods = typeof(ImageGalleryControl)
+    .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+    .Where(method => method.Name == "LoadImagesAsync")
+    .ToArray();
+
+if (asyncLoadMethods.Length == 0)
+{
+    throw new InvalidOperationException("LoadImagesAsync method was not found.");
+}
+
+AssertTrue(asyncLoadMethods.All(method => typeof(Task).IsAssignableFrom(method.ReturnType)), "control exposes async import task");
+
+var computeUiBatchSizeMethod = typeof(ImageGalleryControl).GetMethod(
     "ComputeUiBatchSize",
     BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
 
 if (computeUiBatchSizeMethod is null)
 {
-    throw new InvalidOperationException("ComputeUiBatchSize method was not found.");
+    throw new InvalidOperationException("ImageGalleryControl.ComputeUiBatchSize method was not found.");
 }
 
 var largeBatchSize = (int?)computeUiBatchSizeMethod.Invoke(null, new object?[] { 10_000 });
 AssertTrue(largeBatchSize == 209, "10k items coalesce to about dozens of UI refreshes");
 
 using var control = new ImageGalleryControl();
+control.Width = 1200;
+control.Height = 800;
+
+var initialViewportBatchMethod = typeof(ImageGalleryControl).GetMethod(
+    "ComputeInitialViewportBatchSize",
+    BindingFlags.Instance | BindingFlags.NonPublic);
+
+if (initialViewportBatchMethod is null)
+{
+    throw new InvalidOperationException("ComputeInitialViewportBatchSize method was not found.");
+}
+
+var initialViewportBatchSize = (int?)initialViewportBatchMethod.Invoke(control, Array.Empty<object>());
+AssertTrue(initialViewportBatchSize.HasValue && initialViewportBatchSize.Value > 0, "viewport-first batch is positive");
+AssertTrue(initialViewportBatchSize.HasValue && initialViewportBatchSize.GetValueOrDefault() < 500, "viewport-first batch stays small");
+
 EventHandler? previewCloseHandler = (_, _) => { };
 control.PreviewCloseRequested += previewCloseHandler;
 control.PreviewCloseRequested -= previewCloseHandler;

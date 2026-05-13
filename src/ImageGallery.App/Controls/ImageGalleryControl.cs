@@ -20,6 +20,7 @@ public sealed class ImageGalleryControl : UserControl
     private readonly HScrollBar _horizontalScrollBar = new();
     private readonly List<ImageItem> _items = new();
     private readonly SelectionManager _selectionManager = new();
+    private readonly ImageFileService _imageFileService = new();
     private readonly ThumbnailService _thumbnailService = new();
     private readonly GalleryRenderer _renderer = new();
     private readonly System.Windows.Forms.Timer _hoverTimer = new();
@@ -32,6 +33,7 @@ public sealed class ImageGalleryControl : UserControl
     private float _thumbnailScale = 1.0f;
     private GalleryDisplayStyle _displayStyle = GalleryDisplayStyle.Crystal;
     private ThumbnailInfoFields _thumbnailInfoFields = ThumbnailInfoFields.All;
+    private CancellationTokenSource? _importCts;
 
     private static GalleryLayoutOptions DefaultLayoutOptions => new(128, 56, 10, 14);
 
@@ -121,13 +123,105 @@ public sealed class ImageGalleryControl : UserControl
 
     public IReadOnlyList<ImageItem> Items => _items;
 
+    public async Task<IReadOnlyList<ImageItem>> LoadImagesAsync(
+        IEnumerable<GalleryImageInput> inputs,
+        LoadMode mode,
+        CancellationToken cancellationToken = default)
+    {
+        return await LoadImagesAsync(inputs, mode, progress: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ImageItem>> LoadImagesAsync(
+        IEnumerable<GalleryImageInput> inputs,
+        LoadMode mode,
+        Action<int, int, string>? progress,
+        CancellationToken cancellationToken = default)
+    {
+        var inputArray = inputs
+            .GroupBy(input => input.FilePath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+
+        CancelActiveImport();
+        var importCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var previousImportCts = Interlocked.Exchange(ref _importCts, importCts);
+        previousImportCts?.Dispose();
+
+        try
+        {
+            if (inputArray.Length == 0)
+            {
+                if (mode == LoadMode.Replace)
+                {
+                    await AppendItemsOnUiThreadAsync(Array.Empty<ImageItem>(), LoadMode.Replace, importCts.Token).ConfigureAwait(false);
+                }
+
+                return Array.Empty<ImageItem>();
+            }
+
+            var importedItems = new List<ImageItem>(inputArray.Length);
+            var firstBatchSize = Math.Min(inputArray.Length, ComputeInitialViewportBatchSize());
+            if (firstBatchSize > 0)
+            {
+                var firstBatch = new ArraySegment<GalleryImageInput>(inputArray, 0, firstBatchSize);
+                var firstItems = await _imageFileService
+                    .CreateItemsAsync(firstBatch, progress: null, importCts.Token)
+                    .ConfigureAwait(false);
+                importedItems.AddRange(firstItems);
+                await AppendItemsOnUiThreadAsync(firstItems, mode, importCts.Token).ConfigureAwait(false);
+                ReportProgress(progress, importedItems.Count, inputArray.Length, firstItems);
+            }
+
+            var uiBatchSize = ComputeUiBatchSize(inputArray.Length);
+            for (var offset = firstBatchSize; offset < inputArray.Length; offset += uiBatchSize)
+            {
+                importCts.Token.ThrowIfCancellationRequested();
+
+                var batchSize = Math.Min(uiBatchSize, inputArray.Length - offset);
+                var batch = new ArraySegment<GalleryImageInput>(inputArray, offset, batchSize);
+                var batchItems = await _imageFileService
+                    .CreateItemsAsync(batch, progress: null, importCts.Token)
+                    .ConfigureAwait(false);
+
+                if (batchItems.Count == 0)
+                {
+                    continue;
+                }
+
+                importedItems.AddRange(batchItems);
+                await AppendItemsOnUiThreadAsync(batchItems, LoadMode.Append, importCts.Token).ConfigureAwait(false);
+                ReportProgress(progress, importedItems.Count, inputArray.Length, batchItems);
+            }
+
+            return importedItems;
+        }
+        catch (OperationCanceledException) when (importCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            return Array.Empty<ImageItem>();
+        }
+        finally
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _importCts, null, importCts), importCts))
+            {
+                importCts.Dispose();
+            }
+        }
+    }
+
     public void LoadImages(IEnumerable<GalleryImageInput> inputs, LoadMode mode)
     {
+        CancelActiveImport();
         var items = inputs.Select(CreateItemFromInput);
-        LoadItems(items, mode);
+        LoadItemsCore(items, mode);
     }
 
     public void LoadItems(IEnumerable<ImageItem> items, LoadMode mode)
+    {
+        CancelActiveImport();
+        LoadItemsCore(items, mode);
+    }
+
+    private void LoadItemsCore(IEnumerable<ImageItem> items, LoadMode mode)
     {
         if (mode == LoadMode.Replace)
         {
@@ -158,6 +252,7 @@ public sealed class ImageGalleryControl : UserControl
 
     public void RemoveImage(string filePath)
     {
+        CancelActiveImport();
         var index = _items.FindIndex(i => string.Equals(i.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (index < 0)
         {
@@ -172,6 +267,7 @@ public sealed class ImageGalleryControl : UserControl
 
     public void RemoveImages(IEnumerable<string> filePaths)
     {
+        CancelActiveImport();
         var toRemove = new HashSet<string>(filePaths, StringComparer.OrdinalIgnoreCase);
         if (toRemove.Count == 0)
         {
@@ -186,6 +282,7 @@ public sealed class ImageGalleryControl : UserControl
 
     public void ClearImages()
     {
+        CancelActiveImport();
         if (_items.Count == 0)
         {
             return;
@@ -208,6 +305,7 @@ public sealed class ImageGalleryControl : UserControl
     {
         if (disposing)
         {
+            CancelActiveImport();
             _hoverTimer.Dispose();
             _thumbnailService.Dispose();
         }
@@ -620,6 +718,102 @@ public sealed class ImageGalleryControl : UserControl
     private int HitTest(Point point)
     {
         return _layout.IndexFromPoint(point.X + _scrollX, point.Y + _scrollY);
+    }
+
+    private static int ComputeUiBatchSize(int total)
+    {
+        const int targetRefreshes = 48;
+        if (total <= 0)
+        {
+            return 1;
+        }
+
+        return Math.Max(1, (int)Math.Ceiling(total / (double)targetRefreshes));
+    }
+
+    private static void ReportProgress(
+        Action<int, int, string>? progress,
+        int completed,
+        int total,
+        IReadOnlyList<ImageItem> batchItems)
+    {
+        if (progress is null || batchItems.Count == 0)
+        {
+            return;
+        }
+
+        progress(completed, total, batchItems[^1].FileName);
+    }
+
+    private int ComputeInitialViewportBatchSize()
+    {
+        var options = CreateLayoutOptions();
+        var viewportWidth = Math.Max(1, _canvas.Width > 0 ? _canvas.Width : Width);
+        var viewportHeight = Math.Max(1, _canvas.Height > 0 ? _canvas.Height : Height);
+        var columns = Math.Max(1, (viewportWidth + options.Gap) / options.StepX);
+        var rows = Math.Max(1, (viewportHeight + options.Gap) / options.StepY);
+        return Math.Max(columns * rows, columns * 2);
+    }
+
+    private void CancelActiveImport()
+    {
+        var importCts = Interlocked.Exchange(ref _importCts, null);
+        if (importCts is null)
+        {
+            return;
+        }
+
+        try
+        {
+            importCts.Cancel();
+            importCts.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private Task AppendItemsOnUiThreadAsync(
+        IReadOnlyList<ImageItem> items,
+        LoadMode mode,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (IsDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!IsHandleCreated || !InvokeRequired)
+        {
+            LoadItemsCore(items, mode);
+            return Task.CompletedTask;
+        }
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsDisposed)
+                {
+                    LoadItemsCore(items, mode);
+                }
+
+                tcs.TrySetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                tcs.TrySetCanceled(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }));
+        return tcs.Task;
     }
 
     private void SchedulePrefetchForBacklog()
