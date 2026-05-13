@@ -3,7 +3,7 @@ namespace ImageGallery.Core.Services;
 public sealed class LruCache<TKey, TValue> : IDisposable
     where TKey : notnull
 {
-    private readonly int _capacity;
+    private int _capacity;
     private readonly Action<TValue>? _onEvicted;
     private readonly Dictionary<TKey, LinkedListNode<Entry>> _nodes = new();
     private readonly LinkedList<Entry> _entries = new();
@@ -20,6 +20,26 @@ public sealed class LruCache<TKey, TValue> : IDisposable
     }
 
     public int Count => _nodes.Count;
+
+    public int Capacity
+    {
+        get => _capacity;
+        set
+        {
+            if (value <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _capacity = value;
+            while (_nodes.Count > _capacity)
+            {
+                EvictLast();
+            }
+        }
+    }
+
+    public bool Contains(TKey key) => _nodes.ContainsKey(key);
 
     public bool ContainsKey(TKey key)
     {
