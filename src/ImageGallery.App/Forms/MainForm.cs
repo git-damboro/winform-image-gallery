@@ -9,15 +9,21 @@ namespace ImageGallery.App.Forms;
 
 public sealed class MainForm : Form
 {
-    private readonly List<ImageItem> _items = new();
+    private const float MinScale = 0.1f;
+    private const float MaxScale = 50f;
+    private const int TrackBarMinimum = 0;
+    private const int TrackBarMaximum = 1000;
+
     private readonly ImageFileService _imageFileService = new();
     private readonly GallerySessionStore _sessionStore = new();
     private readonly ImageGalleryControl _galleryControl = new();
     private readonly Button _addButton = new();
     private readonly Button _selectAllButton = new();
     private readonly Button _deleteButton = new();
+    private readonly Button _clearAllButton = new();
     private readonly Label _countLabel = new();
     private readonly TrackBar _sizeTrackBar = new();
+    private readonly Label _scaleValueLabel = new();
     private readonly ComboBox _styleComboBox = new();
     private readonly Button _typeFilterButton = new();
     private readonly ContextMenuStrip _typeFilterDropDown = new();
@@ -29,6 +35,9 @@ public sealed class MainForm : Form
     private readonly Label _taskDetailLabel = new();
     private readonly ProgressBar _taskProgressBar = new();
     private readonly string _sessionFilePath = GetSessionFilePath();
+    private readonly List<ImageItem> _allItems = new();
+    private readonly HashSet<string> _allItemPaths = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _currentFilterExtensions = new(StringComparer.OrdinalIgnoreCase);
     private bool _updatingInfoChoices;
     private bool _updatingTypeFilterChoices;
     private bool _restoringSession;
@@ -50,8 +59,9 @@ public sealed class MainForm : Form
         toolbar.Dock = DockStyle.Top;
         statusBar.Dock = DockStyle.Bottom;
         _galleryControl.Dock = DockStyle.Fill;
-        _galleryControl.PreviewRequested += GalleryControlOnPreviewRequested;
-        _galleryControl.ImageOpenRequested += GalleryControlOnImageOpenRequested;
+
+        _galleryControl.ImageDeleted += GalleryControlOnImageDeleted;
+        _galleryControl.ImageSelected += GalleryControlOnImageSelected;
         _galleryControl.PreviewCloseRequested += GalleryControlOnPreviewCloseRequested;
 
         UpdateCountLabel();
@@ -85,17 +95,18 @@ public sealed class MainForm : Form
                 return;
             }
 
-            BeginTask("\u6b63\u5728\u6062\u590d\u56fe\u7247\u5217\u8868", savedState.ImagePaths.Count);
+            BeginTask("正在恢复图片列表", savedState.ImagePaths.Count);
             await Task.Yield();
-            var savedItems = await CreateItemsWithProgressAsync("\u6b63\u5728\u6062\u590d\u56fe\u7247\u5217\u8868", savedState.ImagePaths);
-            _items.Clear();
-            _items.AddRange(savedItems);
-            _galleryControl.SetItems(_items);
-            UpdateCountLabel();
+
+            await ImportIntoGalleryAsync(
+                "正在恢复图片列表",
+                CreateGalleryInputs(savedState.ImagePaths),
+                LoadMode.Replace,
+                saveSessionWhenCompleted: false);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "\u6062\u590d\u56fe\u7247\u5217\u8868\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, ex.Message, "恢复图片列表失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {
@@ -115,32 +126,46 @@ public sealed class MainForm : Form
             WrapContents = false
         };
 
-        _addButton.Text = "\u6dfb\u52a0\u56fe\u7247";
+        _addButton.Text = "添加图片";
         _addButton.AutoSize = true;
         _addButton.Click += AddButtonOnClick;
 
-        _selectAllButton.Text = "\u5168\u9009";
+        _selectAllButton.Text = "全选";
         _selectAllButton.AutoSize = true;
-        _selectAllButton.Click += (_, _) => _galleryControl.SelectAllVisible();
+        _selectAllButton.Click += (_, _) => _galleryControl.SelectAll();
 
-        _deleteButton.Text = "\u5220\u9664\u9009\u4e2d";
+        _deleteButton.Text = "删除选中";
         _deleteButton.AutoSize = true;
         _deleteButton.Click += DeleteButtonOnClick;
 
+        _clearAllButton.Text = "清除全部";
+        _clearAllButton.AutoSize = true;
+        _clearAllButton.Click += ClearAllButtonOnClick;
+
         var sizeLabel = new Label
         {
-            Text = "\u7f29\u7565\u56fe",
+            Text = "缩略图",
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(16, 8, 0, 0)
         };
 
-        _sizeTrackBar.Minimum = 64;
-        _sizeTrackBar.Maximum = 256;
-        _sizeTrackBar.TickFrequency = 32;
-        _sizeTrackBar.Value = 128;
+        _sizeTrackBar.Minimum = TrackBarMinimum;
+        _sizeTrackBar.Maximum = TrackBarMaximum;
+        _sizeTrackBar.TickFrequency = 100;
+        _sizeTrackBar.Value = ScaleToTrackBar(1.0f);
         _sizeTrackBar.Width = 160;
-        _sizeTrackBar.ValueChanged += (_, _) => _galleryControl.ThumbnailSize = _sizeTrackBar.Value;
+        _sizeTrackBar.ValueChanged += (_, _) =>
+        {
+            var scale = TrackBarToScale(_sizeTrackBar.Value);
+            _galleryControl.ThumbnailScale = scale;
+            UpdateScaleLabel(scale);
+        };
+
+        _scaleValueLabel.AutoSize = true;
+        _scaleValueLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _scaleValueLabel.Margin = new Padding(4, 8, 0, 0);
+        UpdateScaleLabel(TrackBarToScale(_sizeTrackBar.Value));
 
         _styleComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _styleComboBox.Width = 132;
@@ -157,7 +182,6 @@ public sealed class MainForm : Form
         };
 
         ConfigureTypeFilterDropDown();
-
         ConfigureInfoDropDown();
 
         _countLabel.AutoSize = true;
@@ -166,8 +190,10 @@ public sealed class MainForm : Form
         toolbar.Controls.Add(_addButton);
         toolbar.Controls.Add(_selectAllButton);
         toolbar.Controls.Add(_deleteButton);
+        toolbar.Controls.Add(_clearAllButton);
         toolbar.Controls.Add(sizeLabel);
         toolbar.Controls.Add(_sizeTrackBar);
+        toolbar.Controls.Add(_scaleValueLabel);
         toolbar.Controls.Add(_styleComboBox);
         toolbar.Controls.Add(_typeFilterButton);
         toolbar.Controls.Add(_infoDropDownButton);
@@ -221,7 +247,7 @@ public sealed class MainForm : Form
 
     private void ConfigureInfoDropDown()
     {
-        _infoDropDownButton.Text = "\u4fe1\u606f\uff1a\u5168\u90e8";
+        _infoDropDownButton.Text = "信息：全部";
         _infoDropDownButton.AutoSize = true;
         _infoDropDownButton.Margin = new Padding(8, 3, 0, 3);
         _infoDropDownButton.Click += (_, _) => _infoDropDown.Show(_infoDropDownButton, 0, _infoDropDownButton.Height);
@@ -229,15 +255,18 @@ public sealed class MainForm : Form
         _infoCheckedList.BorderStyle = BorderStyle.None;
         _infoCheckedList.CheckOnClick = true;
         _infoCheckedList.Width = 150;
-        _infoCheckedList.Height = 118;
+        _infoCheckedList.Height = 178;
         _infoCheckedList.Items.AddRange(
             new object[]
             {
-                new ThumbnailInfoChoice("\u53ea\u663e\u793a\u56fe\u7247", ThumbnailInfoFields.None),
-                new ThumbnailInfoChoice("\u56fe\u7247\u540d\u79f0", ThumbnailInfoFields.FileName),
-                new ThumbnailInfoChoice("\u56fe\u7247\u5927\u5c0f", ThumbnailInfoFields.FileSize),
-                new ThumbnailInfoChoice("\u56fe\u7247\u7c7b\u578b", ThumbnailInfoFields.ImageType),
-                new ThumbnailInfoChoice("\u56fe\u7247\u5c3a\u5bf8", ThumbnailInfoFields.Dimensions)
+                new ThumbnailInfoChoice("只显示图片", ThumbnailInfoFields.None),
+                new ThumbnailInfoChoice("图片名称", ThumbnailInfoFields.FileName),
+                new ThumbnailInfoChoice("图片大小", ThumbnailInfoFields.FileSize),
+                new ThumbnailInfoChoice("图片类型", ThumbnailInfoFields.ImageType),
+                new ThumbnailInfoChoice("图片尺寸", ThumbnailInfoFields.Dimensions),
+                new ThumbnailInfoChoice("直径", ThumbnailInfoFields.Diameter),
+                new ThumbnailInfoChoice("面积", ThumbnailInfoFields.Area),
+                new ThumbnailInfoChoice("规格", ThumbnailInfoFields.SizeSpec)
             });
 
         _infoDropDown.Items.Add(new ToolStripControlHost(_infoCheckedList)
@@ -261,7 +290,7 @@ public sealed class MainForm : Form
 
     private void ConfigureTypeFilterDropDown()
     {
-        _typeFilterButton.Text = "\u7c7b\u578b\uff1a\u5168\u90e8";
+        _typeFilterButton.Text = "类型：全部";
         _typeFilterButton.AutoSize = true;
         _typeFilterButton.Margin = new Padding(8, 3, 0, 3);
         _typeFilterButton.Click += (_, _) => _typeFilterDropDown.Show(_typeFilterButton, 0, _typeFilterButton.Height);
@@ -273,7 +302,7 @@ public sealed class MainForm : Form
         _typeFilterCheckedList.Items.AddRange(
             new object[]
             {
-                new ImageTypeFilterChoice("\u5168\u90e8\u7c7b\u578b", Array.Empty<string>()),
+                new ImageTypeFilterChoice("全部类型", Array.Empty<string>()),
                 new ImageTypeFilterChoice("PNG", new[] { ".png" }),
                 new ImageTypeFilterChoice("JPG / JPEG", new[] { ".jpg", ".jpeg" }),
                 new ImageTypeFilterChoice("BMP", new[] { ".bmp" }),
@@ -348,7 +377,9 @@ public sealed class MainForm : Form
             {
                 if (_typeFilterCheckedList.Items[index] is ImageTypeFilterChoice choice)
                 {
-                    _typeFilterCheckedList.SetItemChecked(index, choice.Extensions.Any(extension => normalized.Contains(extension, StringComparer.OrdinalIgnoreCase)));
+                    _typeFilterCheckedList.SetItemChecked(
+                        index,
+                        choice.Extensions.Any(extension => normalized.Contains(extension, StringComparer.OrdinalIgnoreCase)));
                 }
             }
         }
@@ -357,10 +388,129 @@ public sealed class MainForm : Form
             _updatingTypeFilterChoices = false;
         }
 
-        _galleryControl.VisibleExtensions = normalized;
+        _currentFilterExtensions = normalized.ToHashSet(StringComparer.OrdinalIgnoreCase);
         _typeFilterButton.Text = allSelected
-            ? "\u7c7b\u578b\uff1a\u5168\u90e8"
-            : $"\u7c7b\u578b\uff1a{CountSelectedExtensions(normalized)} \u9879";
+            ? "类型：全部"
+            : $"类型：{CountSelectedExtensions(normalized)} 项";
+
+        ApplyFilterToGallery();
+    }
+
+    private void ApplyFilterToGallery()
+    {
+        var items = _currentFilterExtensions.Count == 0
+            ? _allItems
+            : _allItems.Where(item =>
+            {
+                var extension = Path.GetExtension(item.FilePath);
+                return _currentFilterExtensions.Contains(ImageFilterPolicy.NormalizeExtension(extension));
+            });
+
+        _galleryControl.LoadItems(items, LoadMode.Replace);
+    }
+
+    private static IEnumerable<GalleryImageInput> CreateGalleryInputs(IEnumerable<string> filePaths)
+    {
+        var index = 0;
+        foreach (var filePath in filePaths)
+        {
+            yield return new GalleryImageInput(filePath, CreateSimulatedContentInfo(filePath, index));
+            index++;
+        }
+    }
+
+    // MainForm is only a demo host for the control. Simulate the caller-provided
+    // content metadata here so the Diameter/Area/SizeSpec fields can be verified visually.
+    private static ImageContentInfo CreateSimulatedContentInfo(string filePath, int index)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        var seed = Math.Abs(StringComparer.OrdinalIgnoreCase.GetHashCode(fileName));
+        var diameter = 8d + (seed % 240) / 10d;
+        var area = 20d + (seed % 5000) / 10d;
+        var spec = $"S{(index % 3) + 1}-{(seed % 90) + 10}";
+        return new ImageContentInfo(diameter, area, spec);
+    }
+
+    private async Task ImportIntoGalleryAsync(
+        string taskName,
+        IEnumerable<GalleryImageInput> inputs,
+        LoadMode mode,
+        bool saveSessionWhenCompleted)
+    {
+        var inputArray = inputs as GalleryImageInput[] ?? inputs.ToArray();
+
+        if (mode == LoadMode.Replace)
+        {
+            _allItems.Clear();
+            _allItemPaths.Clear();
+            _galleryControl.LoadItems(Array.Empty<ImageItem>(), LoadMode.Replace);
+            UpdateCountLabel();
+        }
+
+        var batchSize = ComputeUiBatchSize(inputArray.Length);
+        var completed = 0;
+
+        for (var offset = 0; offset < inputArray.Length; offset += batchSize)
+        {
+            var currentBatchSize = Math.Min(batchSize, inputArray.Length - offset);
+            var batch = new ArraySegment<GalleryImageInput>(inputArray, offset, currentBatchSize);
+            var importedItems = await _imageFileService.CreateItemsAsync(batch, progress: null);
+            var visibleItems = new List<ImageItem>(importedItems.Count);
+
+            foreach (var item in importedItems)
+            {
+                if (!_allItemPaths.Add(item.FilePath))
+                {
+                    continue;
+                }
+
+                _allItems.Add(item);
+                if (MatchesCurrentFilter(item.FilePath))
+                {
+                    visibleItems.Add(item);
+                }
+            }
+
+            if (visibleItems.Count > 0)
+            {
+                _galleryControl.LoadItems(visibleItems, LoadMode.Append);
+            }
+
+            completed += currentBatchSize;
+            var currentFileName = importedItems.Count > 0
+                ? importedItems[^1].FileName
+                : Path.GetFileName(batch.Array![offset + currentBatchSize - 1].FilePath);
+            UpdateCountLabel();
+            UpdateTask(taskName, completed, inputArray.Length, currentFileName);
+            await Task.Yield();
+        }
+
+        if (saveSessionWhenCompleted)
+        {
+            SaveCurrentSession();
+        }
+    }
+
+    private bool MatchesCurrentFilter(string filePath)
+    {
+        if (_currentFilterExtensions.Count == 0)
+        {
+            return true;
+        }
+
+        var extension = Path.GetExtension(filePath);
+        return _currentFilterExtensions.Contains(ImageFilterPolicy.NormalizeExtension(extension));
+    }
+
+    private static int ComputeUiBatchSize(int total)
+    {
+        const int targetRefreshes = 48;
+        if (total <= 0)
+        {
+            return 1;
+        }
+
+        return Math.Max(1, (int)Math.Ceiling(total / (double)targetRefreshes));
     }
 
     private static int CountSelectedExtensions(IEnumerable<string> extensions)
@@ -382,7 +532,6 @@ public sealed class MainForm : Form
         }
 
         var fields = ThumbnailInfoFields.None;
-
         for (var index = 1; index < _infoCheckedList.Items.Count; index++)
         {
             if (_infoCheckedList.GetItemChecked(index) && _infoCheckedList.Items[index] is ThumbnailInfoChoice choice)
@@ -391,13 +540,7 @@ public sealed class MainForm : Form
             }
         }
 
-        if (fields == ThumbnailInfoFields.None)
-        {
-            SetInfoChoices(ThumbnailInfoFields.None);
-            return;
-        }
-
-        SetInfoChoices(fields);
+        SetInfoChoices(fields == ThumbnailInfoFields.None ? ThumbnailInfoFields.None : fields);
     }
 
     private void SetInfoChoices(ThumbnailInfoFields fields)
@@ -421,33 +564,20 @@ public sealed class MainForm : Form
 
         _galleryControl.ThumbnailInfoFields = fields;
         _infoDropDownButton.Text = fields == ThumbnailInfoFields.None
-            ? "\u4fe1\u606f\uff1a\u4ec5\u56fe\u7247"
-            : $"\u4fe1\u606f\uff1a{CountInfoFields(fields)} \u9879";
+            ? "信息：仅图片"
+            : $"信息：{CountInfoFields(fields)} 项";
     }
 
     private static int CountInfoFields(ThumbnailInfoFields fields)
     {
         var count = 0;
-        if (fields.HasFlag(ThumbnailInfoFields.FileName))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.FileSize))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.ImageType))
-        {
-            count++;
-        }
-
-        if (fields.HasFlag(ThumbnailInfoFields.Dimensions))
-        {
-            count++;
-        }
-
+        if (fields.HasFlag(ThumbnailInfoFields.FileName)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.FileSize)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.ImageType)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Dimensions)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Diameter)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.Area)) count++;
+        if (fields.HasFlag(ThumbnailInfoFields.SizeSpec)) count++;
         return count;
     }
 
@@ -457,7 +587,7 @@ public sealed class MainForm : Form
         {
             Filter = FileFormatPolicy.FileDialogFilter,
             Multiselect = true,
-            Title = "\u9009\u62e9\u56fe\u7247"
+            Title = "选择图片"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.FileNames.Length == 0)
@@ -467,17 +597,18 @@ public sealed class MainForm : Form
 
         try
         {
-            BeginTask("\u6b63\u5728\u6dfb\u52a0\u56fe\u7247", dialog.FileNames.Length);
+            BeginTask("正在添加图片", dialog.FileNames.Length);
             await Task.Yield();
-            var newItems = await CreateItemsWithProgressAsync("\u6b63\u5728\u6dfb\u52a0\u56fe\u7247", dialog.FileNames);
-            _items.AddRange(newItems);
-            _galleryControl.SetItems(_items);
-            UpdateCountLabel();
-            SaveCurrentSession();
+
+            await ImportIntoGalleryAsync(
+                "正在添加图片",
+                CreateGalleryInputs(dialog.FileNames),
+                LoadMode.Append,
+                saveSessionWhenCompleted: true);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "\u6dfb\u52a0\u56fe\u7247\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "添加图片失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -485,93 +616,73 @@ public sealed class MainForm : Form
         }
     }
 
-    private Task<IReadOnlyList<ImageItem>> CreateItemsWithProgressAsync(string taskName, IReadOnlyList<string> filePaths)
-    {
-        var progress = new Progress<ImageImportProgress>(progress =>
-        {
-            UpdateTask(taskName, progress.Completed, progress.Total, progress.CurrentFileName);
-        });
-
-        return _imageFileService.CreateItemsAsync(filePaths, progress);
-    }
-
-    private void BeginTask(string taskName, int total)
-    {
-        _addButton.Enabled = false;
-        _deleteButton.Enabled = false;
-        UseWaitCursor = false;
-        Cursor = Cursors.Default;
-        _taskProgressBar.Visible = true;
-        _taskProgressBar.Minimum = 0;
-        _taskProgressBar.Maximum = Math.Max(1, total);
-        _taskProgressBar.Value = 0;
-        _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, 0, total);
-        _taskDetailLabel.Text = string.Empty;
-        RefreshTaskStatus();
-    }
-
-    private void UpdateTask(string taskName, int completed, int total, string currentFileName)
-    {
-        var maximum = Math.Max(1, total);
-        if (_taskProgressBar.Maximum != maximum)
-        {
-            _taskProgressBar.Maximum = maximum;
-        }
-
-        _taskProgressBar.Value = Math.Clamp(completed, _taskProgressBar.Minimum, _taskProgressBar.Maximum);
-        _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, completed, total);
-        _taskDetailLabel.Text = TrimTaskDetail(currentFileName);
-        Cursor = Cursors.Default;
-        RefreshTaskStatus();
-    }
-
-    private void EndTask()
-    {
-        _taskProgressBar.Value = 0;
-        _taskProgressBar.Visible = false;
-        _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
-        _taskDetailLabel.Text = string.Empty;
-        UseWaitCursor = false;
-        Cursor = Cursors.Default;
-        _addButton.Enabled = true;
-        _deleteButton.Enabled = true;
-    }
-
-    private void RefreshTaskStatus()
-    {
-        _taskStatusLabel.Refresh();
-        _taskDetailLabel.Refresh();
-        _taskProgressBar.Refresh();
-    }
-
-    private static string TrimTaskDetail(string currentFileName)
-    {
-        if (string.IsNullOrWhiteSpace(currentFileName))
-        {
-            return string.Empty;
-        }
-
-        const int maxLength = 42;
-        return currentFileName.Length <= maxLength
-            ? currentFileName
-            : $"{currentFileName[..Math.Max(1, maxLength - 1)]}\u2026";
-    }
-
     private void DeleteButtonOnClick(object? sender, EventArgs e)
     {
-        var indexes = _galleryControl.GetSelectedIndexesDescending();
-        foreach (var index in indexes)
+        _galleryControl.HandleDeleteSelected();
+    }
+
+    private void ClearAllButtonOnClick(object? sender, EventArgs e)
+    {
+        _galleryControl.HandleClearAll();
+    }
+
+    private void GalleryControlOnImageDeleted(object? sender, ImageDeletedEventArgs e)
+    {
+        if (e.Action == ImageDeleteAction.ClearAll)
         {
-            if (index >= 0 && index < _items.Count)
-            {
-                _items.RemoveAt(index);
-            }
+            _allItems.Clear();
+            _allItemPaths.Clear();
+        }
+        else
+        {
+            var deletedPaths = e.FilePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _allItems.RemoveAll(item => deletedPaths.Contains(item.FilePath));
+            _allItemPaths.ExceptWith(deletedPaths);
         }
 
-        _galleryControl.SetItems(_items);
         UpdateCountLabel();
         SaveCurrentSession();
         ClosePreview();
+    }
+
+    private void GalleryControlOnImageSelected(object? sender, ImageSelectedEventArgs e)
+    {
+        try
+        {
+            var item = _galleryControl.Items.FirstOrDefault(i => i.FilePath == e.FilePath);
+            if (item != null)
+            {
+                if (e.Mode == ImageSelectionMode.PinnedOpen)
+                {
+                    _pinnedPreviewForm = EnsurePreviewForm(_pinnedPreviewForm);
+                    _pinnedPreviewForm.ShowImage(_galleryControl.Items, item, Cursor.Position, pinned: true);
+                }
+                else
+                {
+                    _previewForm = EnsurePreviewForm(_previewForm);
+                    _previewForm.ShowImage(_galleryControl.Items, item, Cursor.Position);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "大图查看失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void GalleryControlOnPreviewCloseRequested(object? sender, EventArgs e)
+    {
+        ClosePreview();
+    }
+
+    private static PreviewForm EnsurePreviewForm(PreviewForm? previewForm)
+    {
+        if (previewForm is null || previewForm.IsDisposed)
+        {
+            return new PreviewForm();
+        }
+
+        return previewForm;
     }
 
     private void ApplyStyleSelection(GalleryDisplayStyle style)
@@ -593,69 +704,28 @@ public sealed class MainForm : Form
     {
         if (keyData == (Keys.Control | Keys.A))
         {
-            _galleryControl.SelectAllVisible();
+            _galleryControl.SelectAll();
             return true;
         }
 
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    private void GalleryControlOnPreviewRequested(object? sender, ImageItem item)
-    {
-        try
-        {
-            _previewForm ??= new PreviewForm();
-            _previewForm.ShowImage(GetVisibleItems(), item, Cursor.Position);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "\u9884\u89c8\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-    }
-
-    private void GalleryControlOnImageOpenRequested(object? sender, ImageItem item)
-    {
-        try
-        {
-            _pinnedPreviewForm ??= new PreviewForm();
-            _pinnedPreviewForm.ShowImage(GetVisibleItems(), item, Cursor.Position, pinned: true);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "\u5927\u56fe\u67e5\u770b\u5931\u8d25", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-    }
-
-    private void GalleryControlOnPreviewCloseRequested(object? sender, EventArgs e)
-    {
-        ClosePreview();
-    }
-
     private void ClosePreview()
     {
-        if (_previewForm == null)
-        {
-            return;
-        }
-
-        _previewForm.HidePreview();
+        _previewForm?.HidePreview();
     }
 
     private void UpdateCountLabel()
     {
-        _countLabel.Text = $"\u5171 {_items.Count:N0} \u5f20";
-    }
-
-    private IReadOnlyList<ImageItem> GetVisibleItems()
-    {
-        return ImageFilterPolicy.FilterByExtensions(_items, _galleryControl.VisibleExtensions);
+        _countLabel.Text = $"共 {_allItems.Count:N0} 张";
     }
 
     private void SaveCurrentSession()
     {
         _sessionStore.Save(
             _sessionFilePath,
-            _items
+            _allItems
                 .Select(item => item.FilePath)
                 .Where(path => !path.StartsWith("virtual://", StringComparison.OrdinalIgnoreCase)),
             _galleryControl.DisplayStyle);
@@ -669,6 +739,93 @@ public sealed class MainForm : Form
             : localAppData;
 
         return Path.Combine(baseDirectory, "MryaoImageGallery", "session.json");
+    }
+
+    private static int ScaleToTrackBar(float scale)
+    {
+        var logMin = Math.Log(MinScale);
+        var logMax = Math.Log(MaxScale);
+        var logScale = Math.Log(Math.Clamp(scale, MinScale, MaxScale));
+        var t = (logScale - logMin) / (logMax - logMin);
+        return (int)Math.Round(t * TrackBarMaximum);
+    }
+
+    private static float TrackBarToScale(int trackBarValue)
+    {
+        var logMin = Math.Log(MinScale);
+        var logMax = Math.Log(MaxScale);
+        var t = (double)trackBarValue / TrackBarMaximum;
+        return (float)Math.Exp(logMin + t * (logMax - logMin));
+    }
+
+    private void UpdateScaleLabel(float scale)
+    {
+        _scaleValueLabel.Text = FormatScaleText(scale);
+    }
+
+    private static string FormatScaleText(float scale)
+    {
+        return $"{scale:0.##}x";
+    }
+
+    private void BeginTask(string taskName, int total)
+    {
+        _addButton.Enabled = false;
+        _deleteButton.Enabled = false;
+        _clearAllButton.Enabled = false;
+        _taskProgressBar.Visible = true;
+        _taskProgressBar.Minimum = 0;
+        _taskProgressBar.Maximum = Math.Max(1, total);
+        _taskProgressBar.Value = 0;
+        _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, 0, total);
+        _taskDetailLabel.Text = string.Empty;
+        RefreshTaskStatus();
+    }
+
+    private void UpdateTask(string taskName, int completed, int total, string currentFileName)
+    {
+        var maximum = Math.Max(1, total);
+        if (_taskProgressBar.Maximum != maximum)
+        {
+            _taskProgressBar.Maximum = maximum;
+        }
+
+        _taskProgressBar.Value = Math.Clamp(completed, _taskProgressBar.Minimum, _taskProgressBar.Maximum);
+        _taskStatusLabel.Text = TaskProgressFormatter.Format(taskName, completed, total);
+        _taskDetailLabel.Text = TrimTaskDetail(currentFileName);
+        RefreshTaskStatus();
+    }
+
+    private void EndTask()
+    {
+        _taskProgressBar.Value = 0;
+        _taskProgressBar.Visible = false;
+        _taskStatusLabel.Text = TaskProgressFormatter.FormatIdle();
+        _taskDetailLabel.Text = string.Empty;
+        _addButton.Enabled = true;
+        _deleteButton.Enabled = true;
+        _clearAllButton.Enabled = true;
+        RefreshTaskStatus();
+    }
+
+    private void RefreshTaskStatus()
+    {
+        _taskStatusLabel.Refresh();
+        _taskDetailLabel.Refresh();
+        _taskProgressBar.Refresh();
+    }
+
+    private static string TrimTaskDetail(string currentFileName)
+    {
+        if (string.IsNullOrWhiteSpace(currentFileName))
+        {
+            return string.Empty;
+        }
+
+        const int maxLength = 42;
+        return currentFileName.Length <= maxLength
+            ? currentFileName
+            : $"{currentFileName[..Math.Max(1, maxLength - 1)]}…";
     }
 
     private sealed class ThumbnailInfoChoice

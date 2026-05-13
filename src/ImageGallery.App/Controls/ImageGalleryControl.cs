@@ -61,6 +61,8 @@ public sealed class ImageGalleryControl : UserControl
 
     public event EventHandler<ImageSelectedEventArgs>? ImageSelected;
 
+    public event EventHandler? PreviewCloseRequested;
+
     public float ThumbnailScale
     {
         get => _thumbnailScale;
@@ -121,6 +123,12 @@ public sealed class ImageGalleryControl : UserControl
 
     public void LoadImages(IEnumerable<GalleryImageInput> inputs, LoadMode mode)
     {
+        var items = inputs.Select(CreateItemFromInput);
+        LoadItems(items, mode);
+    }
+
+    public void LoadItems(IEnumerable<ImageItem> items, LoadMode mode)
+    {
         if (mode == LoadMode.Replace)
         {
             _thumbnailService.CancelPrefetch();
@@ -133,16 +141,15 @@ public sealed class ImageGalleryControl : UserControl
             ? new HashSet<string>(_items.Select(i => i.FilePath), StringComparer.OrdinalIgnoreCase)
             : null;
 
-        foreach (var input in inputs)
+        foreach (var item in items)
         {
-            if (existingPaths != null && existingPaths.Contains(input.FilePath))
+            if (existingPaths != null && existingPaths.Contains(item.FilePath))
             {
                 continue;
             }
 
-            var item = CreateItemFromInput(input);
             _items.Add(item);
-            existingPaths?.Add(input.FilePath);
+            existingPaths?.Add(item.FilePath);
         }
 
         RebuildVisibleItems(clearSelection: mode == LoadMode.Replace);
@@ -536,6 +543,7 @@ public sealed class ImageGalleryControl : UserControl
     {
         _hoverTimer.Stop();
         _hoverIndex = -1;
+        PreviewCloseRequested?.Invoke(this, EventArgs.Empty);
         InvalidateCanvas();
     }
 
@@ -545,7 +553,7 @@ public sealed class ImageGalleryControl : UserControl
         if (index >= 0 && index < _visibleItemIndexes.Count)
         {
             var item = _items[_visibleItemIndexes[index]];
-            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath));
+            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath, ImageSelectionMode.PinnedOpen));
         }
     }
 
@@ -556,11 +564,11 @@ public sealed class ImageGalleryControl : UserControl
         if (_hoverIndex >= 0 && _hoverIndex < _visibleItemIndexes.Count)
         {
             var item = _items[_visibleItemIndexes[_hoverIndex]];
-            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath));
+            ImageSelected?.Invoke(this, new ImageSelectedEventArgs(item.FilePath, ImageSelectionMode.HoverPreview));
         }
     }
 
-    private void HandleDeleteSelected()
+    internal void HandleDeleteSelected()
     {
         var selectedVisibleIndexes = _selectionManager.GetSelectedIndexesDescending();
         if (selectedVisibleIndexes.Count == 0)
@@ -593,7 +601,7 @@ public sealed class ImageGalleryControl : UserControl
         ImageDeleted?.Invoke(this, new ImageDeletedEventArgs(action, filePaths));
     }
 
-    private void HandleClearAll()
+    internal void HandleClearAll()
     {
         if (_items.Count == 0)
         {
