@@ -1,154 +1,331 @@
 # WinForms Image Gallery
 
-WinForms Image Gallery 是一个基于 `.NET 8.0` 的 Windows 本地图片缩略图浏览系统，适合在本机管理、浏览和筛选大量图片。系统支持批量导入、缩略图风格切换、图片类型筛选、大图预览、选择删除、会话恢复和加载进度提示。
+一个面向 WinForms 的图像浏览控件与示例程序，支持大批量图片缩略图浏览、内容信息展示、删除事件回调、双击选中事件、缩略图风格切换，以及面向大数据量场景的异步分批导入。
 
-## 一、系统功能
-
-| 功能 | 说明 |
-|---|---|
-| 批量导入图片 | 支持一次选择多张图片导入，适合本地大量图片浏览场景 |
-| 缩略图网格浏览 | 以网格方式展示图片，支持鼠标滚轮和滚动条浏览 |
-| 实时滚动显示 | 拖动滚动条时会实时刷新当前可见图片 |
-| 大图预览 | 双击缩略图打开大图窗口，支持键盘左右键切换 |
-| 翻页提示 | 大图查看时显示文件名和当前序号，例如 `1/21323` |
-| 多选与全选 | 支持鼠标选择、`Ctrl + A` 和顶部“全选”按钮 |
-| 删除选中图片 | 可以删除当前选中的图片项 |
-| 图片类型筛选 | 支持多选筛选 PNG、JPG、BMP、GIF、TIFF、WEBP 等类型 |
-| 缩略图信息控制 | 可选择是否显示图片名称、大小、类型和尺寸 |
-| 缩略图尺寸调整 | 可通过顶部滑块调整缩略图大小 |
-| 多种显示风格 | 支持 default、rounded、shadow、border、polaroid、glass、crystal、neon、minimal |
-| 会话恢复 | 重新打开程序时自动恢复上次导入的图片列表和缩略图风格 |
-| 进度提示 | 启动恢复和导入图片时显示当前任务、进度和当前文件名 |
-
-## 二、运行环境
-
-| 项目 | 要求 |
-|---|---|
-| 操作系统 | Windows 10 / Windows 11 |
-| 运行时 | .NET 8 Desktop Runtime，或更高版本 |
-| 项目框架 | `net8.0-windows` |
-| 开发工具 | Visual Studio 2022 或 .NET SDK 8.0+ |
-
-> 注意：这是 WinForms 桌面程序，新电脑必须安装 Windows 桌面运行时。只安装普通 `.NET Runtime` 不一定能运行 WinForms 程序。
-
-## 三、新电脑部署方式
-
-### 方式一：直接运行发布包
-
-适合只需要使用程序的新电脑。
-
-1. 在新电脑安装 `.NET 8 Desktop Runtime`。
-2. 解压发布压缩包。
-3. 进入解压后的文件夹。
-4. 双击运行 `ImageGallery.App.exe`。
-
-如果运行时报缺少 .NET 运行环境，请安装：
-
-```text
-.NET 8 Desktop Runtime x64
-```
-
-### 方式二：从源码运行
-
-适合需要继续开发或修改代码的新电脑。
-
-1. 安装 `.NET SDK 8.0` 或更高版本。
-2. 安装 Visual Studio 2022，并勾选“.NET 桌面开发”工作负载。
-3. 克隆或复制本项目源码。
-4. 在项目根目录执行：
-
-```powershell
-dotnet run --project src\ImageGallery.App\ImageGallery.App.csproj
-```
-
-## 四、如何重新打包发布包
-
-在项目根目录执行：
-
-```powershell
-dotnet publish src\ImageGallery.App\ImageGallery.App.csproj -c Release -r win-x64 --self-contained false -o release\publish
-```
-
-然后压缩 `release\publish` 目录即可。
-
-当前项目使用框架依赖发布方式，压缩包体积更小，但新电脑需要提前安装 `.NET 8 Desktop Runtime`。
-
-## 五、项目结构
+## 项目结构
 
 | 路径 | 说明 |
-|---|---|
-| `src/ImageGallery.App` | WinForms 桌面程序入口、窗体、控件和渲染逻辑 |
-| `src/ImageGallery.Core` | 图片模型、布局计算、筛选、选择、会话保存等核心逻辑 |
-| `tests/ImageGallery.Core.Tests` | 核心逻辑自检测试 |
-| `docs/superpowers/specs` | 需求和设计说明 |
-| `docs/superpowers/plans` | 实现计划 |
+| --- | --- |
+| `src/ImageGallery.Core` | 核心模型、布局计算、过滤、会话保存、信息格式化 |
+| `src/ImageGallery.App` | WinForms 控件、渲染、缩略图服务、示例宿主窗体 |
+| `tests/ImageGallery.Core.Tests` | Core 层自检 |
+| `tests/ImageGallery.App.Tests` | App / 控件层自检 |
 
-## 六、常用开发命令
+## 当前能力
 
-运行程序：
+| 功能 | 状态 |
+| --- | --- |
+| 网格缩略图浏览 | 已实现 |
+| 横向 / 纵向滚动条 | 已实现 |
+| 缩略图倍率 0.1x 到 50x | 已实现 |
+| 缩略图下显示直径 / 面积 / 规格 | 已实现 |
+| 追加导入 / 替换导入 | 已实现 |
+| 删除单张 / 多张 / 全部 | 已实现 |
+| 用户删除后的事件回调 | 已实现 |
+| 上级程序主动删除且不回调 | 已实现 |
+| 双击图片选中事件 | 已实现 |
+| 多种显示风格，包含 `Crystal` | 已实现 |
+| 首屏优先加载 | 已实现 |
+| 异步批量导入 | 已实现 |
+| 低频率底部进度刷新 | 已实现 |
+
+## 本轮按新需求完成的改动
+
+| 类别 | 改动 |
+| --- | --- |
+| 控件化接口 | 把大批量导入能力下沉到 `ImageGalleryControl`，不再只依赖 `MainForm` |
+| 新公开 API | 新增 `LoadImagesAsync(...)`，上级程序可直接异步导入 |
+| 加载策略 | 先按当前视口容量加载首批图片，再后台分批处理剩余图片 |
+| 进度策略 | 底部进度按“批次”更新，不再每张图片刷新一次，兼顾可见性与性能 |
+| 取消机制 | 替换、清空、销毁时会取消进行中的导入 |
+| 事件语义 | 保留删除事件与选中事件；双击时通过 `ImageSelected` 上报完整文件路径 |
+| 信息展示 | 支持 `FileName / FileSize / ImageType / Dimensions / Diameter / Area / SizeSpec` |
+| 宿主接线 | 示例程序 `MainForm` 已切换到控件级异步导入主路径 |
+
+## 运行环境
+
+| 项目 | 当前配置 |
+| --- | --- |
+| 操作系统 | Windows 10 / 11 |
+| SDK | .NET SDK 8.0+ |
+| 应用目标框架 | `net8.0-windows` |
+| Core 目标框架 | `net8.0` |
+
+> 说明：当前代码仓库实际目标框架是 `.NET 8`。如果后续要严格满足 “.NET 6.0 及以上” 的交付要求，需要再补多目标或下调目标框架。
+
+## 快速运行
+
+### 运行示例程序
 
 ```powershell
 dotnet run --project src\ImageGallery.App\ImageGallery.App.csproj
 ```
 
-运行测试：
+### 运行测试
 
 ```powershell
+dotnet run --project tests\ImageGallery.App.Tests\ImageGallery.App.Tests.csproj
 dotnet run --project tests\ImageGallery.Core.Tests\ImageGallery.Core.Tests.csproj
 ```
 
-构建程序：
+### 构建
 
 ```powershell
 dotnet build src\ImageGallery.App\ImageGallery.App.csproj
 ```
 
-发布程序：
+## 控件公开用法
 
-```powershell
-dotnet publish src\ImageGallery.App\ImageGallery.App.csproj -c Release -r win-x64 --self-contained false -o release\publish
+### 1. 基本模型
+
+```csharp
+using ImageGallery.App.Controls;
+using ImageGallery.Core.Models;
 ```
 
-## 七、使用说明
+上级程序传入的数据模型：
 
-1. 点击“添加图片”导入本地图片。
-2. 使用顶部滑块调整缩略图大小。
-3. 使用风格下拉框切换缩略图显示风格。
-4. 使用“类型”下拉框筛选要显示的图片类型。
-5. 使用“信息”下拉框控制缩略图下方显示哪些信息。
-6. 鼠标滚轮或滚动条浏览图片。
-7. 单击图片选择，`Ctrl + A` 或“全选”选择当前可见图片。
-8. 双击缩略图打开大图查看。
-9. 在大图窗口使用鼠标或键盘左右键切换图片。
+| 类型 | 说明 |
+| --- | --- |
+| `GalleryImageInput` | 单张图片输入，包含文件路径和内容信息 |
+| `ImageContentInfo` | 内容信息，包含最大物体直径、面积、规格 |
+| `LoadMode.Replace` | 替换当前全部图片 |
+| `LoadMode.Append` | 在现有图片基础上追加 |
 
-## 八、缩略图风格说明
+### 2. 创建控件
 
-| 风格 | 效果 |
-|---|---|
-| `default` | 默认基础卡片效果 |
-| `rounded` | 圆角卡片效果 |
-| `shadow` | 更明显的卡片阴影 |
-| `border` | 描边边框效果 |
-| `polaroid` | 拍立得照片样式，底部留白 |
-| `glass` | 柔和半透明玻璃质感 |
-| `crystal` | 冷色渐变、高光、轻微发光的水晶卡片效果 |
-| `neon` | 霓虹发光效果 |
-| `minimal` | 极简扁平效果 |
+```csharp
+var gallery = new ImageGalleryControl
+{
+    Dock = DockStyle.Fill,
+    DisplayStyle = GalleryDisplayStyle.Crystal,
+    ThumbnailScale = 1.0f,
+    ThumbnailInfoFields =
+        ThumbnailInfoFields.Diameter
+        | ThumbnailInfoFields.Area
+        | ThumbnailInfoFields.SizeSpec
+};
 
-## 九、数据保存说明
+Controls.Add(gallery);
+```
 
-程序会在本地用户目录保存会话信息，包括：
+### 3. 组织输入数据
 
-| 数据 | 说明 |
-|---|---|
-| 图片路径列表 | 用于下次启动时恢复上次导入的图片 |
-| 缩略图风格 | 用于恢复上次选择的显示风格 |
+```csharp
+var inputs = new[]
+{
+    new GalleryImageInput(
+        @"D:\Images\a.jpg",
+        new ImageContentInfo(
+            MaxObjectDiameter: 12.5,
+            MaxObjectArea: 88.2,
+            SizeSpec: "S1-01")),
+    new GalleryImageInput(
+        @"D:\Images\b.png",
+        new ImageContentInfo(
+            MaxObjectDiameter: 18.0,
+            MaxObjectArea: 126.4,
+            SizeSpec: "S2-08"))
+};
+```
 
-程序不会把图片复制到项目目录，保存的是图片原始路径。如果新电脑上图片路径变化，需要重新导入图片。
+### 4. 异步导入，推荐
 
-## 十、注意事项
+#### 替换方式
 
-- 如果需要浏览一万张以上图片，建议图片放在本地磁盘，避免网络盘带来的读取延迟。
-- 如果图片被移动或删除，程序恢复时会保留条目但显示加载失败信息。
-- HEIC、HEIF、AVIF 等格式可以识别，但是否能直接显示取决于 Windows 系统解码支持。
-- 如果需要让没有 .NET 环境的新电脑直接运行，可以改为自包含发布：`--self-contained true`，但压缩包会明显变大。
+```csharp
+await gallery.LoadImagesAsync(inputs, LoadMode.Replace);
+```
+
+#### 追加方式
+
+```csharp
+await gallery.LoadImagesAsync(inputs, LoadMode.Append);
+```
+
+#### 带低频进度回调
+
+```csharp
+await gallery.LoadImagesAsync(
+    inputs,
+    LoadMode.Append,
+    (completed, total, currentFileName) =>
+    {
+        statusLabel.Text = $"正在导入 {completed}/{total}";
+        detailLabel.Text = currentFileName;
+    });
+```
+
+> 这里的进度不是每张图都回调一次，而是按控件内部批次回调，适合大批量场景。
+
+### 5. 同步导入，兼容旧用法
+
+```csharp
+gallery.LoadImages(inputs, LoadMode.Replace);
+```
+
+> 同步接口仍然保留，但大批量场景建议优先使用 `LoadImagesAsync(...)`。
+
+## 删除接口与事件
+
+### 上级程序主动删除，不触发删除事件
+
+```csharp
+gallery.RemoveImage(@"D:\Images\a.jpg");
+
+gallery.RemoveImages(new[]
+{
+    @"D:\Images\b.jpg",
+    @"D:\Images\c.png"
+});
+
+gallery.ClearImages();
+```
+
+### 用户在控件中删除，触发删除事件
+
+```csharp
+gallery.ImageDeleted += (_, e) =>
+{
+    switch (e.Action)
+    {
+        case ImageDeleteAction.Single:
+        case ImageDeleteAction.Multiple:
+            foreach (var filePath in e.FilePaths)
+            {
+                Console.WriteLine(filePath);
+            }
+            break;
+
+        case ImageDeleteAction.ClearAll:
+            Console.WriteLine("全部清空");
+            break;
+    }
+};
+```
+
+事件规则：
+
+| 场景 | 是否触发 `ImageDeleted` |
+| --- | --- |
+| 用户通过控件 UI 删除单张/多张 | 触发 |
+| 用户通过控件 UI 清空全部 | 触发 |
+| 上级程序调用 `RemoveImage/RemoveImages/ClearImages` | 不触发 |
+
+## 选中事件
+
+### 双击图片后的选中事件
+
+```csharp
+gallery.ImageSelected += (_, e) =>
+{
+    if (e.Mode == ImageSelectionMode.PinnedOpen)
+    {
+        Console.WriteLine($"双击选中: {e.FilePath}");
+    }
+};
+```
+
+当前 `ImageSelected` 还承载悬浮预览通知：
+
+| `Mode` | 含义 |
+| --- | --- |
+| `HoverPreview` | 悬浮预览 |
+| `PinnedOpen` | 双击固定打开 / 选中 |
+
+如果上级程序只关心“双击选中”，只处理 `PinnedOpen` 即可。
+
+## 缩略图显示控制
+
+### 设置显示字段
+
+```csharp
+gallery.ThumbnailInfoFields =
+    ThumbnailInfoFields.FileName
+    | ThumbnailInfoFields.Diameter
+    | ThumbnailInfoFields.Area
+    | ThumbnailInfoFields.SizeSpec;
+```
+
+### 设置缩略图倍率
+
+```csharp
+gallery.ThumbnailScale = 0.5f;   // 0.5x
+gallery.ThumbnailScale = 1.0f;   // 1.0x
+gallery.ThumbnailScale = 10.0f;  // 10x
+```
+
+范围：
+
+| 属性 | 范围 |
+| --- | --- |
+| `ThumbnailScale` | `0.1f` 到 `50f` |
+
+### 设置显示风格
+
+```csharp
+gallery.DisplayStyle = GalleryDisplayStyle.Crystal;
+```
+
+支持风格：
+
+| 风格 |
+| --- |
+| `Default` |
+| `Rounded` |
+| `Shadow` |
+| `Border` |
+| `Polaroid` |
+| `Glass` |
+| `Crystal` |
+| `Neon` |
+| `Minimal` |
+
+## 性能说明
+
+### 当前实现策略
+
+| 策略 | 说明 |
+| --- | --- |
+| 首屏优先 | 先按视口行列容量加载首批图片，优先让用户看到内容 |
+| 后台分批导入 | 剩余图片按批次继续导入，避免一次性全量阻塞 UI |
+| 低频进度更新 | 底部进度按批次更新，而不是每张图片都更新 |
+| 缩略图缓存 | 使用缓存与后台预取，减少重复解码 |
+| 超大图保护 | 对超大图走降级缩略图路径，降低内存压力 |
+| 非锁文件读取 | 文件读取使用共享方式打开，避免锁死图片文件 |
+
+### 已知说明
+
+| 项 | 说明 |
+| --- | --- |
+| 现代格式 | `WEBP / HEIC / HEIF / AVIF` 已识别，但是否可解码仍取决于系统解码支持 |
+| 当前目标框架 | 仓库当前是 `.NET 8`，不是 `.NET 6` 多目标 |
+| 事件语义 | `ImageSelected` 当前同时覆盖悬浮预览与双击选中，通过 `Mode` 区分 |
+
+## 示例宿主说明
+
+`MainForm` 只是控件演示宿主，额外做了两件事：
+
+| 内容 | 说明 |
+| --- | --- |
+| 模拟内容信息 | 为演示直径 / 面积 / 规格显示，示例程序会自动生成模拟数据 |
+| 会话恢复 | 关闭后会保存已加载图片路径与风格，下次启动自动恢复 |
+
+## 推荐回归验证
+
+| 场景 | 检查点 |
+| --- | --- |
+| 一次追加几千张图片 | 首屏能尽快看到图片，后续持续分批补齐 |
+| 导入 1 万张图片 | 底部进度会动，但不会高频抖动 |
+| 清空 / 替换 | 导入中的旧任务不会继续回灌 |
+| 双击图片 | 上级程序能收到 `PinnedOpen` 事件和完整文件路径 |
+| 用户删除 | 上级程序能收到 `ImageDeleted` 及文件列表 |
+
+## 常用命令
+
+```powershell
+dotnet run --project src\ImageGallery.App\ImageGallery.App.csproj
+dotnet run --project tests\ImageGallery.App.Tests\ImageGallery.App.Tests.csproj
+dotnet run --project tests\ImageGallery.Core.Tests\ImageGallery.Core.Tests.csproj
+dotnet build src\ImageGallery.App\ImageGallery.App.csproj
+```

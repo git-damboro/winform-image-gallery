@@ -169,7 +169,7 @@ public sealed class ImageGalleryControl : UserControl
                     .ConfigureAwait(false);
                 importedItems.AddRange(firstItems);
                 await AppendItemsOnUiThreadAsync(firstItems, mode, importCts.Token).ConfigureAwait(false);
-                ReportProgress(progress, importedItems.Count, inputArray.Length, firstItems);
+                await ReportProgressOnUiThreadAsync(progress, importedItems.Count, inputArray.Length, firstItems, importCts.Token).ConfigureAwait(false);
             }
 
             var uiBatchSize = ComputeUiBatchSize(inputArray.Length);
@@ -190,7 +190,7 @@ public sealed class ImageGalleryControl : UserControl
 
                 importedItems.AddRange(batchItems);
                 await AppendItemsOnUiThreadAsync(batchItems, LoadMode.Append, importCts.Token).ConfigureAwait(false);
-                ReportProgress(progress, importedItems.Count, inputArray.Length, batchItems);
+                await ReportProgressOnUiThreadAsync(progress, importedItems.Count, inputArray.Length, batchItems, importCts.Token).ConfigureAwait(false);
             }
 
             return importedItems;
@@ -731,18 +731,46 @@ public sealed class ImageGalleryControl : UserControl
         return Math.Max(1, (int)Math.Ceiling(total / (double)targetRefreshes));
     }
 
-    private static void ReportProgress(
+    private Task ReportProgressOnUiThreadAsync(
         Action<int, int, string>? progress,
         int completed,
         int total,
-        IReadOnlyList<ImageItem> batchItems)
+        IReadOnlyList<ImageItem> batchItems,
+        CancellationToken cancellationToken)
     {
         if (progress is null || batchItems.Count == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        progress(completed, total, batchItems[^1].FileName);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var currentFileName = batchItems[^1].FileName;
+        if (!IsHandleCreated || !InvokeRequired)
+        {
+            progress(completed, total, currentFileName);
+            return Task.CompletedTask;
+        }
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress(completed, total, currentFileName);
+                tcs.TrySetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                tcs.TrySetCanceled(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }));
+        return tcs.Task;
     }
 
     private int ComputeInitialViewportBatchSize()
